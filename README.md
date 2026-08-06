@@ -1,8 +1,20 @@
 # Tezcat
 
-> **Tezcat is an agent-based market ecology laboratory for studying emergent financial market dynamics through reproducible experiments, controlled shocks, regime-aware agents, and quantitative market metrics.**
+> Financial markets are complex adaptive systems. **Tezcat** is a cloud-native laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
+
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
+[![AWS Serverless](https://img.shields.io/badge/AWS-Serverless-FF9900?style=flat-square)](https://aws.amazon.com/)
+[![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
+[![Agent-Based Simulation](https://img.shields.io/badge/Agent--Based-Simulation-6a40e5?style=flat-square)]()
+[![MIT License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 Tezcat does not predict markets. It creates artificial markets populated by heterogeneous trading agents, then lets you run controlled experiments on how bubbles, crashes, liquidity crises, and recoveries **emerge** — price is never imposed externally; it arises from order flow through a real limit order book.
+
+## See it in action
+
+![Tezcat demo — preset selection through crash recovery to report](docs/img/tezcat_demo.gif)
+*12-second walkthrough: select Flash Crash preset → run starts → whale order hits at step 800 → crisis regime → recovery → final report.*
 
 ![Tezcat run dashboard — flash crash preset](docs/img/dashboard_run.png)
 *The live run dashboard: emergent flash crash at step 800 (whale sell program → MM withdrawal → panic sentiment), regime bands, live order book ladder, trade tape, and a shock-injection panel.*
