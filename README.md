@@ -4,6 +4,9 @@
 
 Tezcat does not predict markets. It creates artificial markets populated by heterogeneous trading agents, then lets you run controlled experiments on how bubbles, crashes, liquidity crises, and recoveries **emerge** — price is never imposed externally; it arises from order flow through a real limit order book.
 
+![Tezcat run dashboard — flash crash preset](docs/img/dashboard_run.png)
+*The live run dashboard: emergent flash crash at step 800 (whale sell program → MM withdrawal → panic sentiment), regime bands, live order book ladder, trade tape, and a shock-injection panel.*
+
 ## What's inside
 
 | Layer | What it does |
@@ -49,14 +52,36 @@ Tests (51 passing — unit, integration, simulation validation):
 | **Flash Crash** | At step 800 a whale sell program hits a thin book; market makers withdraw; sentiment turns; retail panics. ~30% drawdown, crisis regime, then a V-shaped recovery as mean-reversion capital buys the dip. |
 | **Bubble Formation** | Hype sentiment waves + momentum-heavy ecology push price ~+40%; a reality check deflates it. Momentum/retail profit on the way up, market makers bleed. |
 
-Same seed + same config ⇒ identical run, tick for tick.
+Same seed + same config ⇒ identical run, tick for tick. All figures below are generated
+from real deterministic runs by `scripts/make_figures.py`:
+
+![Emergent price paths of the three presets](docs/img/presets.png)
+
+### Anatomy of the flash crash
+
+Price, spread, and book depth around the shock chain — regime detection (crisis
+bands in red, recovery in green) reacts purely to emergent market stress:
+
+![Flash crash anatomy — price, spread, liquidity](docs/img/flash_crash.png)
+
+### Who paid for it
+
+The report attributes PnL by strategy. Panic-selling retail transfers wealth to
+the mean-reversion traders who bought the dislocation:
+
+![PnL by agent type after the flash crash](docs/img/agent_pnl.png)
 
 ## Try the demo (2 minutes)
 
 1. Open the dashboard → pick **Flash Crash** → CREATE EXPERIMENT → START RUN.
+
+   ![Preset gallery](docs/img/dashboard_home.png)
+
 2. Watch price, spread, book depth. At step ~800 the whale hits: depth collapses, spread blows out, regime flips to **CRISIS**.
 3. Inject your own shock live from the run page (e.g. another `whale_order`, sell, magnitude 2000).
 4. Wait for recovery, then open the **report**: max drawdown, crash detected, PnL by agent type (panicking retail loses; dip-buying mean-reverters profit).
+
+   ![Run report](docs/img/dashboard_report.png)
 
 ## API
 
@@ -69,6 +94,34 @@ GET  /api/runs/{id}         (pause/resume/cancel)
 POST /api/runs/{id}/shocks   ← inject shocks into a live market
 GET  /api/runs/{id}/market | history | trades | metrics | shocks | regimes | report
 POST /api/runs/{id}/export
+```
+
+## Architecture
+
+```mermaid
+flowchart LR
+    User([Researcher]) --> FE["React Dashboard<br/>black terminal UI"]
+    FE -->|REST /api| API[FastAPI]
+
+    subgraph Laboratory["Control plane"]
+        API --> EXP["Experiments<br/>immutable + hashed"]
+        API --> RUNS["Run Manager<br/>threads · pause/resume"]
+    end
+
+    subgraph Engine["Ecology Engine (pure Python, seeded)"]
+        RUNS --> LOOP[Step Loop]
+        LOOP --> SHK[Shock Engine]
+        LOOP --> RGM[Regime Engine]
+        LOOP --> AGT["Agent Engine<br/>5 types + memory"]
+        AGT --> BOOK["Order Book<br/>price-time priority"]
+        BOOK --> MATCH[Matching Engine]
+        MATCH --> PF["Portfolios<br/>invariants"]
+        LOOP --> MET[Metrics Engine]
+    end
+
+    MET --> STORE[("LocalStore / AwsStore<br/>S3-layout artifacts")]
+    RUNS --> STORE
+    STORE --> FE
 ```
 
 ## Repository layout
