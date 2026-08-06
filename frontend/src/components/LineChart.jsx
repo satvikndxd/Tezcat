@@ -64,6 +64,16 @@ export default function LineChart({
       (s) => s && typeof s.step === 'number' && s.step >= xd[0] && s.step <= xd[1]
     );
 
+    // Stagger labels of nearby markers onto separate rows so they never overlap.
+    const rowRight = [];
+    const markRow = marks.map((s) => {
+      const x = sx(s.step);
+      let r = 0;
+      while (r < 3 && rowRight[r] !== undefined && x < rowRight[r]) r++;
+      rowRight[r] = x + 3 + 6.5 * String(s.label || 'SHOCK').length;
+      return r;
+    });
+
     body = (
       <>
         {bands.map((b, i) => {
@@ -112,7 +122,7 @@ export default function LineChart({
               />
               <text
                 x={x + 3}
-                y={pad.top + 8}
+                y={pad.top + 8 + markRow[i] * 10}
                 {...AXIS_TEXT}
                 fill="var(--accent)"
               >
