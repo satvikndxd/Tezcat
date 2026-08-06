@@ -1,0 +1,97 @@
+import React, { useEffect, useState } from 'react';
+import { onConnectionChange, getConnectionStatus } from './api/client';
+import Home from './pages/Home.jsx';
+import Experiment from './pages/Experiment.jsx';
+import Run from './pages/Run.jsx';
+import Report from './pages/Report.jsx';
+
+// ---- tiny hash router ----------------------------------------------------
+
+function parseRoute() {
+  const hash = window.location.hash || '#/';
+  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  if (parts.length === 0) return { page: 'home' };
+  if (parts[0] === 'experiment' && parts[1]) {
+    return { page: 'experiment', id: decodeURIComponent(parts[1]) };
+  }
+  if (parts[0] === 'run' && parts[1]) {
+    if (parts[2] === 'report') {
+      return { page: 'report', id: decodeURIComponent(parts[1]) };
+    }
+    return { page: 'run', id: decodeURIComponent(parts[1]) };
+  }
+  return { page: 'home' };
+}
+
+function useRoute() {
+  const [route, setRoute] = useState(parseRoute);
+  useEffect(() => {
+    const onHash = () => setRoute(parseRoute());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  return route;
+}
+
+// ---- status bar ----------------------------------------------------------
+
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span>
+      {now.toISOString().slice(0, 10)} {now.toTimeString().slice(0, 8)}
+    </span>
+  );
+}
+
+function ConnStatus() {
+  const [ok, setOk] = useState(getConnectionStatus());
+  useEffect(() => onConnectionChange(setOk), []);
+  const cls = ok === true ? 'online' : ok === false ? 'offline' : 'unknown';
+  const text = ok === true ? 'API ONLINE' : ok === false ? 'API OFFLINE' : 'CONNECTING';
+  return <span className={`conn ${cls}`}>{text}</span>;
+}
+
+function StatusBar() {
+  return (
+    <header className="statusbar">
+      <div className="brand">
+        <a href="#/">TEZCAT — MARKET ECOLOGY LAB</a>
+      </div>
+      <div className="right">
+        <Clock />
+        <ConnStatus />
+      </div>
+    </header>
+  );
+}
+
+// ---- app -----------------------------------------------------------------
+
+export default function App() {
+  const route = useRoute();
+  let page;
+  switch (route.page) {
+    case 'experiment':
+      page = <Experiment id={route.id} key={route.id} />;
+      break;
+    case 'run':
+      page = <Run id={route.id} key={route.id} />;
+      break;
+    case 'report':
+      page = <Report id={route.id} key={route.id} />;
+      break;
+    default:
+      page = <Home />;
+  }
+  return (
+    <>
+      <StatusBar />
+      <main className="page">{page}</main>
+    </>
+  );
+}

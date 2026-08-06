@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Tezcat - agent-based market ecology laboratory.
+  Control API (API Gateway + Lambda), chunked worker Lambda, DynamoDB metadata,
+  S3 artifacts, EventBridge run triggering, CloudWatch observability.
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 120
+    MemorySize: 1024
+    Environment:
+      Variables:
+        TEZCAT_STORE: aws
+        TEZCAT_S3_BUCKET: !Ref ArtifactBucket
+        TEZCAT_TABLE_EXPERIMENTS: !Ref ExperimentsTable
+        TEZCAT_TABLE_RUNS: !Ref RunsTable
+
+Resources:
+  # ---------------------------------------------------------------- storage
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'tezcat-lab-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-artifacts
+            Status: Enabled
+            ExpirationInDays: 90
+
+  ExperimentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TezcatExperiments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: experiment_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: experiment_id, KeyType: HASH}
+
+  RunsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TezcatRuns
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: run_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: run_id, KeyType: HASH}
+
+  # ---------------------------------------------------------------- control
+  ControlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: tezcat-control
+      Handler: tezcat.api.lambda_handlers.control_handler
+      CodeUri: ../../
+      Description: REST control plane (experiments, runs, presets, reads)
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /api/{proxy+}
+            Method: ANY
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref ExperimentsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref RunsTable}
+        - S3CrudPolicy: {BucketName: !Sub 'tezcat-lab-${AWS::AccountId}'}
+        - EventBridgePutEventsPolicy: {EventBusName: default}
+
+  # ---------------------------------------------------------------- worker
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: tezcat-worker
+      Handler: tezcat.api.lambda_handlers.worker_handler
+      CodeUri: ../../
+      Timeout: 600
+      MemorySize: 2048
+      Description: Executes run chunks; checkpoints and self-reschedules via EventBridge
+      Events:
+        RunRequested:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [tezcat]
+              detail-type: [RunChunkRequested]
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref ExperimentsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref RunsTable}
+        - S3CrudPolicy: {BucketName: !Sub 'tezcat-lab-${AWS::AccountId}'}
+        - EventBridgePutEventsPolicy: {EventBusName: default}
+
+  # ---------------------------------------------------------------- alarms
+  WorkerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tezcat-worker-errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - {Name: FunctionName, Value: !Ref WorkerFunction}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  ApiUrl:
+    Value: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  Bucket:
+    Value: !Ref ArtifactBucket
