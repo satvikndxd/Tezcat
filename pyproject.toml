@@ -1,0 +1,26 @@
+[project]
+name = "tezcat"
+version = "0.1.0"
+description = "Agent-based market ecology laboratory for studying emergent financial market dynamics"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+aws = ["boto3>=1.34"]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: long full-preset simulation tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tezcat*"]
