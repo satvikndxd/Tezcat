@@ -2,11 +2,27 @@
 
 Cash for open buy orders and inventory for open sell orders are *reserved* at
 order-acceptance time so no agent can commit resources it does not have.
+
+Monetary precision policy
+-------------------------
+Cash is binary floating point. Prices are tick-snapped and quantities are
+integers, so every settlement amount is ``tick_price * int``; float error
+enters only through repeated add/subtract accumulation. Two tolerances are
+defined and used consistently:
+
+- ``CASH_EPS`` (1e-9): comparison slack for order admission (``can_buy``).
+- ``INVARIANT_EPS`` (1e-6): slack for conservation/invariant assertions.
+
+Amounts within these tolerances are considered equal; a violation beyond
+``INVARIANT_EPS`` is treated as an accounting bug, not rounding noise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+CASH_EPS = 1e-9
+INVARIANT_EPS = 1e-6
 
 
 @dataclass
@@ -34,7 +50,7 @@ class Portfolio:
         return self.inventory - self.reserved_inventory
 
     def can_buy(self, price: float, quantity: int) -> bool:
-        return self.available_cash + 1e-9 >= price * quantity
+        return self.available_cash + CASH_EPS >= price * quantity
 
     def can_sell(self, quantity: int) -> bool:
         return self.available_inventory >= quantity

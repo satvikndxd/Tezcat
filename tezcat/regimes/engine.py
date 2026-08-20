@@ -10,9 +10,6 @@ from typing import Any, Dict, List, Optional
 
 from tezcat.core.config import Regime, RegimeModifiers, RegimePolicy
 
-_event_counter = itertools.count(1)
-
-
 @dataclass
 class RegimeEvent:
     event_id: str
@@ -41,6 +38,8 @@ class RegimeEngine:
         self.policy = policy
         self.current = Regime.STABLE
         self.events: List[RegimeEvent] = []
+        # Run-scoped: event IDs are deterministic per run, not process-global.
+        self._event_counter = itertools.count(1)
 
         lb = policy.lookback
         self._prices: deque = deque(maxlen=lb)
@@ -134,7 +133,7 @@ class RegimeEngine:
     # ------------------------------------------------------------------
     def _transition(self, step: int, target: Regime, reason: str, metrics: Dict[str, Any]) -> None:
         ev = RegimeEvent(
-            event_id=f"rgm_{next(_event_counter):06d}",
+            event_id=f"rgm_{next(self._event_counter):06d}",
             run_id=self.run_id,
             step=step,
             previous_regime=self.current.value,

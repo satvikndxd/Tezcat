@@ -8,6 +8,13 @@ Rules
 4. Partial fills are allowed; a non-marketable limit remainder rests in the book.
 5. Market orders execute until filled, unaffordable, or the book is empty; any
    remainder is discarded (status "cancelled").
+6. An order whose ID collides with a resting order is rejected at validation
+   ("duplicate order id"); `OrderBook.add_limit` additionally raises as a
+   last-resort defense.
+7. Self-trades follow `MarketConfig.self_trade_policy`: "allow" (legacy
+   baseline; settles against the same portfolio) or "cancel_resting"
+   (standard STP: the resting order is cancelled, reservations released,
+   and matching continues).
 """
 
 from __future__ import annotations
@@ -19,8 +26,6 @@ from typing import Dict, List, Optional, Tuple
 from tezcat.agents.portfolio import Portfolio
 from tezcat.core.config import MarketConfig
 from tezcat.market.order_book import Order, OrderBook
-
-_trade_counter = itertools.count(1)
 
 
 @dataclass
@@ -44,6 +49,9 @@ class MatchingEngine:
         self.book = book
         self.portfolios = portfolios
         self.config = config
+        # Run-scoped: trade IDs are deterministic for a given order stream,
+        # independent of how many engines ran earlier in this process.
+        self._trade_counter = itertools.count(1)
 
     # ------------------------------------------------------------------
     def validate(self, order: Order) -> Optional[str]:
@@ -51,6 +59,8 @@ class MatchingEngine:
         pf = self.portfolios.get(order.agent_id)
         if pf is None:
             return "unknown agent"
+        if self.book.get_order(order.order_id) is not None:
+            return "duplicate order id"
         if order.quantity < self.config.min_order_size:
             return "quantity below minimum"
         if order.quantity > self.config.max_order_size:
@@ -142,6 +152,14 @@ class MatchingEngine:
             if not self._crosses(order, exec_price):
                 break
 
+            # Self-trade policy (see MarketConfig.self_trade_policy).
+            if (resting.agent_id == order.agent_id
+                    and self.config.self_trade_policy == "cancel_resting"):
+                cancelled = self.book.cancel(resting.order_id, step, status="cancelled")
+                if cancelled is not None:
+                    self.release_on_cancel(cancelled)
+                continue
+
             qty = min(order.remaining, resting.remaining)
 
             # Market buys are capped by the buyer's available cash.
@@ -167,7 +185,7 @@ class MatchingEngine:
 
             trades.append(
                 Trade(
-                    trade_id=f"trd_{next(_trade_counter):08d}",
+                    trade_id=f"trd_{next(self._trade_counter):08d}",
                     step=step,
                     price=exec_price,
                     quantity=qty,

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from tezcat import __version__
 from tezcat.core.config import ExperimentConfig
-from tezcat.experiments.model import Experiment, Run
+from tezcat.experiments.model import ConfigHashMismatch, Experiment, Run
 from tezcat.experiments.presets import build_config, get_preset, list_presets
 from tezcat.persistence.aws import get_store
 from tezcat.api.runner import RunManager
@@ -181,7 +181,10 @@ def api_create_run(experiment_id: str, body: Optional[CreateRunBody] = None):
         seed = _random.SystemRandom().randrange(2**31)
     delay = body.step_delay_ms if body.step_delay_ms is not None else exp.config.step_delay_ms
     run = Run.create(exp, seed=seed, step_delay_ms=delay)
-    runner.start(run, exp)
+    try:
+        runner.start(run, exp)
+    except ConfigHashMismatch as exc:
+        raise HTTPException(409, str(exc)) from exc
     log.info("run %s started for experiment %s (seed=%s)", run.run_id, experiment_id, seed)
     return run.to_dict()
 

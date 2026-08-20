@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from tezcat import __version__
+from tezcat.core.config import SCHEMA_VERSION, canonical_json
 from tezcat.engine.ecology import EcologyEngine
 from tezcat.experiments.model import Experiment, Run
 
@@ -37,6 +40,8 @@ class RunManager:
 
     # ------------------------------------------------------------------
     def start(self, run: Run, experiment: Experiment) -> None:
+        # Refuse to execute an experiment whose stored identity is stale.
+        experiment.verify_hash()
         lr = LiveRun(run, experiment)
         with self._lock:
             self.live[run.run_id] = lr
@@ -73,6 +78,16 @@ class RunManager:
             if engine.done:
                 engine.check_invariants()
                 lr.report = engine.build_report()
+                # Provenance (Phase F2): every published number must be
+                # traceable to config, code, seed, and reproducible hashes.
+                lr.report["provenance"] = {
+                    "schema_version": SCHEMA_VERSION,
+                    "code_version": __version__,
+                    "config_hash": run.config_hash,
+                    "seed": run.seed,
+                    "state_hash": engine.state_hash(),
+                    "event_hash": engine.event_hash(),
+                }
                 run.status = "completed"
                 run.completed_at = _now()
                 self._persist_artifacts(lr)
@@ -90,14 +105,30 @@ class RunManager:
     def _persist_artifacts(self, lr: LiveRun) -> None:
         run, engine = lr.run, lr.engine
         prefix = run.s3_prefix or f"runs/{run.run_id}"
-        self.store.save_artifact(prefix, "report/report.json", lr.report)
-        self.store.save_artifact(prefix, "trades/trades.json", engine.trades)
-        self.store.save_artifact(prefix, "snapshots/snapshots.json", engine.snapshots)
-        self.store.save_artifact(prefix, "metrics/step_metrics.json", engine.metrics.step_metrics)
-        self.store.save_artifact(prefix, "shocks/shock_events.json",
-                                 [e.to_dict() for e in engine.shocks.events])
-        self.store.save_artifact(prefix, "regimes/regime_events.json",
-                                 [e.to_dict() for e in engine.regimes.events])
+        artifacts = {
+            "report/report.json": lr.report,
+            "trades/trades.json": engine.trades,
+            "snapshots/snapshots.json": engine.snapshots,
+            "metrics/step_metrics.json": engine.metrics.step_metrics,
+            "shocks/shock_events.json": [e.to_dict() for e in engine.shocks.events],
+            "regimes/regime_events.json": [e.to_dict() for e in engine.regimes.events],
+        }
+        checksums = {}
+        for name, payload in artifacts.items():
+            self.store.save_artifact(prefix, name, payload)
+            checksums[name] = hashlib.sha256(canonical_json(payload).encode()).hexdigest()
+        # Manifest last, so its presence implies the artifacts it names exist.
+        self.store.save_artifact(prefix, "manifest.json", {
+            "run_id": run.run_id,
+            "experiment_id": run.experiment_id,
+            "config_hash": run.config_hash,
+            "seed": run.seed,
+            "schema_version": SCHEMA_VERSION,
+            "code_version": __version__,
+            "state_hash": engine.state_hash(),
+            "event_hash": engine.event_hash(),
+            "artifact_checksums": checksums,
+        })
 
     # ------------------------------------------------------------------
     def get(self, run_id: str) -> Optional[LiveRun]:

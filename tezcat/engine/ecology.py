@@ -13,6 +13,7 @@ Step sequence (per step):
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import random
 from typing import Any, Dict, List, Optional
@@ -20,7 +21,9 @@ from typing import Any, Dict, List, Optional
 from tezcat.agents.base import AgentRegistry, BaseAgent, MarketView, OrderIntent
 from tezcat.agents.portfolio import Portfolio
 from tezcat.agents import traders  # noqa: F401  (registers agent types)
-from tezcat.core.config import ExperimentConfig, Regime, ShockConfig, ShockType
+from tezcat.core.config import (
+    SCHEMA_VERSION, ExperimentConfig, Regime, ShockConfig, ShockType, canonical_json,
+)
 from tezcat.market.matching import MatchingEngine, Trade
 from tezcat.market.order_book import Order, OrderBook
 from tezcat.metrics.engine import MetricsEngine
@@ -55,6 +58,9 @@ class EcologyEngine:
         # Exogenous whale participant used by whale-order shocks.
         whale_endowment = mc.initial_price * 1_000_000
         self.portfolios[WHALE_ID] = Portfolio(cash=whale_endowment, inventory=200_000)
+        # Conservation targets frozen at construction (no fees/financing yet).
+        self._expected_total_cash = sum(p.cash for p in self.portfolios.values())
+        self._expected_total_inventory = sum(p.inventory for p in self.portfolios.values())
 
         self.env = EnvironmentState()
         self.matching = MatchingEngine(self.book, self.portfolios, mc)
@@ -272,15 +278,97 @@ class EcologyEngine:
 
     # ------------------------------------------------------------------
     def check_invariants(self) -> None:
-        """Economic invariants; raises AssertionError on violation."""
+        """Economic invariants; raises AssertionError on violation.
+
+        Checks, in order: inventory conservation, cash conservation (no fees
+        or financing exist, so total cash is constant), per-agent resource
+        floors, reservation bounds, and exact reconciliation of reservations
+        against the open orders resting in the book.
+        """
+        from tezcat.agents.portfolio import INVARIANT_EPS
+
         mc = self.config.market
         total_inventory = sum(p.inventory for p in self.portfolios.values())
-        expected = 200_000 + sum(g.inventory * g.count for g in self.config.agents)
-        assert total_inventory == expected, f"asset not conserved: {total_inventory} != {expected}"
+        assert total_inventory == self._expected_total_inventory, (
+            f"asset not conserved: {total_inventory} != {self._expected_total_inventory}")
+
+        total_cash = sum(p.cash for p in self.portfolios.values())
+        # Float add/sub error can accumulate over many settlements; allow a
+        # small absolute drift far below any economically meaningful amount.
+        assert abs(total_cash - self._expected_total_cash) <= max(1.0, 1e-9 * self._expected_total_cash), (
+            f"cash not conserved: {total_cash} != {self._expected_total_cash}")
+
+        # Reservations must reconcile exactly to the resting open orders.
+        expected_res_cash: Dict[str, float] = {aid: 0.0 for aid in self.portfolios}
+        expected_res_inv: Dict[str, int] = {aid: 0 for aid in self.portfolios}
+        for side in (self.book.bids, self.book.asks):
+            for order in side.all_orders():
+                if order.side == "buy":
+                    expected_res_cash[order.agent_id] += (order.price or 0.0) * order.remaining
+                else:
+                    expected_res_inv[order.agent_id] += order.remaining
+
         for aid, p in self.portfolios.items():
             if not mc.allow_negative_cash:
-                assert p.cash >= -1e-6, f"negative cash for {aid}: {p.cash}"
+                assert p.cash >= -INVARIANT_EPS, f"negative cash for {aid}: {p.cash}"
             if not mc.allow_short:
                 assert p.inventory >= 0, f"negative inventory for {aid}: {p.inventory}"
-            assert p.reserved_cash <= p.cash + 1e-6, f"over-reserved cash for {aid}"
+            assert p.reserved_cash <= p.cash + INVARIANT_EPS, f"over-reserved cash for {aid}"
             assert p.reserved_inventory <= p.inventory, f"over-reserved inventory for {aid}"
+            assert abs(p.reserved_cash - expected_res_cash[aid]) <= INVARIANT_EPS, (
+                f"reserved cash for {aid} ({p.reserved_cash}) does not reconcile "
+                f"to open buy orders ({expected_res_cash[aid]})")
+            assert p.reserved_inventory == expected_res_inv[aid], (
+                f"reserved inventory for {aid} ({p.reserved_inventory}) does not "
+                f"reconcile to open sell orders ({expected_res_inv[aid]})")
+
+    # ------------------------------------------------------------------
+    # Deterministic identity (Phase F2)
+    # ------------------------------------------------------------------
+    def state_hash(self) -> str:
+        """Canonical hash of the semantic kernel state.
+
+        Covers the book (per-level FIFO order queues), all portfolios,
+        environment state, regime, step counter, and last price. Floats are
+        encoded with ``repr`` (shortest exact round-trip form), so two states
+        hash equal iff they are bit-identical, and the hash is stable across
+        fresh processes.
+        """
+        def side_state(side):
+            ticks = side.sorted_ticks
+            return [
+                [t, [[o.order_id, o.agent_id, o.remaining, o.seq, o.status]
+                     for o in side.levels[t]]]
+                for t in ticks
+            ]
+
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "step": self.step_num,
+            "last_price": repr(self.last_price),
+            "book": {"bids": side_state(self.book.bids), "asks": side_state(self.book.asks)},
+            "portfolios": {
+                aid: [repr(p.cash), p.inventory, repr(p.reserved_cash),
+                      p.reserved_inventory, repr(p.realized_pnl), repr(p.avg_cost)]
+                for aid, p in sorted(self.portfolios.items())
+            },
+            "env": {"sentiment": repr(self.env.sentiment), "mm_withdrawn": self.env.mm_withdrawn},
+            "regime": self.regimes.current.value,
+        }
+        return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
+
+    def event_hash(self) -> str:
+        """Canonical hash of the recorded event/output sequence.
+
+        Covers trades, snapshots, shock events, and regime events in order.
+        Two runs with the same config, schema, and seed must produce the same
+        event hash; any divergence is a determinism failure.
+        """
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "trades": self.trades,
+            "snapshots": self.snapshots,
+            "shock_events": [e.to_dict() for e in self.shocks.events],
+            "regime_events": [e.to_dict() for e in self.regimes.events],
+        }
+        return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

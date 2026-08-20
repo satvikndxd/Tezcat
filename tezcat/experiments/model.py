@@ -8,7 +8,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from tezcat import __version__
-from tezcat.core.config import ExperimentConfig, config_hash
+from tezcat.core.config import SCHEMA_VERSION, ExperimentConfig, config_hash
+
+
+class ConfigHashMismatch(ValueError):
+    """A stored config hash does not match the config's current content."""
 
 
 def _now() -> str:
@@ -45,6 +49,23 @@ class Experiment:
             created_at=_now(),
         )
 
+    def verify_hash(self) -> None:
+        """Fail loudly if the stored hash no longer matches the config.
+
+        The config models are frozen, so a mismatch means either external
+        mutation of nested containers, a hand-edited stored record, or a
+        schema-version change since the experiment was created. In every case
+        the experiment must not be executed under its stored identity.
+        """
+        current = config_hash(self.config)
+        if current != self.config_hash:
+            raise ConfigHashMismatch(
+                f"experiment {self.experiment_id}: stored config_hash "
+                f"{self.config_hash[:12]}… does not match current config "
+                f"{current[:12]}… (schema_version={SCHEMA_VERSION}); "
+                "re-create the experiment instead of mutating it"
+            )
+
     def to_dict(self, include_config: bool = True) -> Dict[str, Any]:
         d = {
             "experiment_id": self.experiment_id,
@@ -52,6 +73,7 @@ class Experiment:
             "hypothesis": self.hypothesis,
             "preset_id": self.preset_id,
             "config_hash": self.config_hash,
+            "schema_version": SCHEMA_VERSION,
             "version": self.version,
             "created_at": self.created_at,
             "status": self.status,
