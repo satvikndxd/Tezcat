@@ -21,7 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 #: Version of the simulation/config schema. Included in every config hash and
 #: artifact manifest; bump on any change that alters serialized semantics.
-SCHEMA_VERSION = 1
+#: v2: RiskPolicy added to ExperimentConfig (margin/liquidation mechanics).
+SCHEMA_VERSION = 2
 
 
 class FrozenModel(BaseModel):
@@ -151,6 +152,41 @@ class RegimePolicy(FrozenModel):
     )
 
 
+class RiskPolicy(FrozenModel):
+    """Margin, leverage, and liquidation mechanics (Phase F8).
+
+    Disabled by default: legacy presets keep strict no-negative-cash
+    semantics. When enabled, agents may buy on margin (cash may go
+    negative) subject to an initial-margin gate at order admission and a
+    maintenance-margin liquidation *process* — forced selling is real order
+    flow through the matching engine, with declared delay and aggressiveness,
+    never an instantaneous inventory mutation.
+
+    Margin model: ``equity = cash + inventory × mark``;
+    ``position = inventory × mark``; ``margin ratio = equity / position``.
+    Max leverage ≈ 1 / initial_margin. The whale participant is exogenous
+    and exempt.
+    """
+
+    enabled: bool = False
+    initial_margin: float = Field(0.5, gt=0, le=1,
+                                  description="Min equity/position to admit new buys")
+    maintenance_margin: float = Field(0.25, gt=0, le=1,
+                                      description="Breach below this triggers a margin call")
+    liquidation_delay: int = Field(2, ge=0,
+                                   description="Steps a breach must persist before forced selling")
+    liquidation_fraction: float = Field(0.25, gt=0, le=1,
+                                        description="Fraction of inventory sold per liquidation slice")
+    liquidation_order_type: Literal["market"] = Field(
+        "market", description="Aggressiveness of forced flow (market only for now)")
+
+    @model_validator(mode="after")
+    def _check_margins(self) -> "RiskPolicy":
+        if self.maintenance_margin >= self.initial_margin:
+            raise ValueError("maintenance_margin must be < initial_margin")
+        return self
+
+
 class MetricsPolicy(FrozenModel):
     vol_window: int = Field(20, ge=2)
     return_window: int = Field(10, ge=1)
@@ -165,6 +201,7 @@ class ExperimentConfig(FrozenModel):
     shocks: List[ShockConfig] = Field(default_factory=list)
     regime_policy: RegimePolicy = Field(default_factory=RegimePolicy)
     metrics_policy: MetricsPolicy = Field(default_factory=MetricsPolicy)
+    risk: RiskPolicy = Field(default_factory=RiskPolicy)
     total_steps: int = Field(1500, ge=10, le=100_000)
     seed_policy: Literal["fixed", "random"] = "fixed"
     default_seed: int = Field(42, ge=0)

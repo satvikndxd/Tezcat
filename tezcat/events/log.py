@@ -35,6 +35,15 @@ intervention     fork-time declared intervention with parent lineage
                  (name, operations, parent_run_id, checkpoint_step,
                   checkpoint_hash)
 
+Risk events (schema version 2, Phase F8 — forensic records; the forced
+orders themselves appear as normal order/trade events):
+margin_call      maintenance breach began
+                 (agent_id, equity, position_value, margin_ratio, threshold)
+margin_restored  breach cleared (agent_id, margin_ratio)
+liquidation      a forced-sell slice is due
+                 (agent_id, quantity, reason, margin_ratio, equity, order_type)
+default          zero inventory with negative cash (agent_id, debt)
+
 The full accounting semantics implied by each event are documented in
 docs/events.md; the replay kernel (tezcat.events.replay) is the executable
 definition.
@@ -48,7 +57,8 @@ from typing import Any, Dict, List
 from tezcat.core.config import canonical_json
 
 #: Version of the event schema; bump on any change to types or payloads.
-EVENT_SCHEMA_VERSION = 1
+#: v2: risk events (margin_call, margin_restored, liquidation, default).
+EVENT_SCHEMA_VERSION = 2
 
 
 class ReplayError(ValueError):

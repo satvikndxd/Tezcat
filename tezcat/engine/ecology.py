@@ -70,8 +70,17 @@ class EcologyEngine:
         self._expected_total_inventory = sum(p.inventory for p in self.portfolios.values())
 
         self.env = EnvironmentState()
+        # Risk engine (Phase F8): only constructed when enabled, so legacy
+        # configs keep strict cash semantics and the frozen baseline.
+        if config.risk.enabled:
+            from tezcat.risk.engine import RiskEngine
+            self.risk: Optional["RiskEngine"] = RiskEngine(
+                config.risk, self.portfolios, events=self.events_log)
+            self.risk.mark_price = mc.initial_price
+        else:
+            self.risk = None
         self.matching = MatchingEngine(self.book, self.portfolios, mc,
-                                       events=self.events_log)
+                                       events=self.events_log, risk=self.risk)
         self.shocks = ShockEngine(run_id, config.shocks, self.env)
         self.regimes = RegimeEngine(run_id, config.regime_policy)
         self.metrics = MetricsEngine(run_id, config.metrics_policy, mc.initial_price)
@@ -134,6 +143,29 @@ class EcologyEngine:
                 if got == 0:
                     break  # book exhausted; retry next step
             sl["program"]["remaining"] -= filled
+
+    # ------------------------------------------------------------------
+    def _run_liquidations(self) -> None:
+        """Execute forced sells due this step. Forced flow is real order
+        flow: it goes through validation and matching, consumes liquidity,
+        and appears in the event log like any other order."""
+        max_chunk = self.config.market.max_order_size
+        for agent_id, quantity in self.risk.evaluate(self.step_num, self.last_price):
+            remaining = quantity
+            while remaining > 0:
+                chunk = min(remaining, max_chunk)
+                order = Order(
+                    order_id=self._next_order_id(), agent_id=agent_id,
+                    side="sell", order_type="market", price=None,
+                    quantity=chunk, remaining=chunk, created_step=self.step_num,
+                )
+                trades, order = self.matching.submit(order, self.step_num)
+                self._record_trades(trades)
+                filled = sum(t.quantity for t in trades)
+                self.risk.record_forced_fill(filled)
+                remaining -= chunk
+                if filled == 0:
+                    break  # book exhausted; the breach clock keeps running
 
     # ------------------------------------------------------------------
     def _record_trades(self, trades: List[Trade]) -> None:
@@ -230,6 +262,10 @@ class EcologyEngine:
         self._fire_shocks()
         self._run_whale_slices()
 
+        # 2b. margin evaluation + forced liquidation flow (risk enabled only)
+        if self.risk is not None:
+            self._run_liquidations()
+
         # 3. regime evaluation (uses last step's metrics)
         n_regime_events = len(self.regimes.events)
         self.regimes.observe(
@@ -295,12 +331,17 @@ class EcologyEngine:
 
     # ------------------------------------------------------------------
     def build_report(self) -> Dict[str, Any]:
-        return self.metrics.build_report(
+        report = self.metrics.build_report(
             self.run_id, self.agents, self.last_price,
             shock_count=len(self.shocks.events),
             regime_events=self.regimes.events,
             regime_step_counts=self.regime_step_counts,
         )
+        if self.risk is not None:
+            # Flat risk_* keys so batch designs can declare them as
+            # dependent variables; absent entirely when risk is disabled.
+            report.update(self.risk.report())
+        return report
 
     # ------------------------------------------------------------------
     def check_invariants(self) -> None:
@@ -334,12 +375,16 @@ class EcologyEngine:
                 else:
                     expected_res_inv[order.agent_id] += order.remaining
 
+        margin_on = self.risk is not None
         for aid, p in self.portfolios.items():
-            if not mc.allow_negative_cash:
+            if not mc.allow_negative_cash and not margin_on:
+                # Under margin (risk enabled), negative cash IS borrowing —
+                # bounded by the margin gates, not by a hard floor.
                 assert p.cash >= -INVARIANT_EPS, f"negative cash for {aid}: {p.cash}"
             if not mc.allow_short:
                 assert p.inventory >= 0, f"negative inventory for {aid}: {p.inventory}"
-            assert p.reserved_cash <= p.cash + INVARIANT_EPS, f"over-reserved cash for {aid}"
+            if not margin_on:
+                assert p.reserved_cash <= p.cash + INVARIANT_EPS, f"over-reserved cash for {aid}"
             assert p.reserved_inventory <= p.inventory, f"over-reserved inventory for {aid}"
             assert abs(p.reserved_cash - expected_res_cash[aid]) <= INVARIANT_EPS, (
                 f"reserved cash for {aid} ({p.reserved_cash}) does not reconcile "
@@ -445,6 +490,7 @@ class EcologyEngine:
             "shocks": self.shocks.state_dict(),
             "regimes": self.regimes.state_dict(),
             "metrics": self.metrics.state_dict(),
+            "risk": self.risk.state_dict() if self.risk is not None else None,
             "events_log": self.events_log.state_dict(),
             "trades": self.trades,
             "snapshots": self.snapshots,
@@ -522,6 +568,11 @@ class EcologyEngine:
         eng.shocks.load_state(checkpoint["shocks"])
         eng.regimes.load_state(checkpoint["regimes"])
         eng.metrics.load_state(checkpoint["metrics"])
+        if checkpoint.get("risk") is not None:
+            if eng.risk is None:
+                raise ValueError("checkpoint carries risk state but the "
+                                 "config has risk disabled")
+            eng.risk.load_state(checkpoint["risk"])
         eng.events_log.load_state(checkpoint["events_log"])
         eng.trades = list(checkpoint["trades"])
         eng.snapshots = list(checkpoint["snapshots"])

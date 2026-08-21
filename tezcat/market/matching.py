@@ -46,11 +46,16 @@ class OrderRejected(Exception):
 
 class MatchingEngine:
     def __init__(self, book: OrderBook, portfolios: Dict[str, Portfolio],
-                 config: MarketConfig, events: Optional[EventLog] = None):
+                 config: MarketConfig, events: Optional[EventLog] = None,
+                 risk=None):
         self.book = book
         self.portfolios = portfolios
         self.config = config
         self.events = events
+        # Optional RiskEngine (Phase F8): when present, buy admission uses
+        # the initial-margin gate instead of the strict cash check, and
+        # market buys are capped by margin headroom instead of cash.
+        self.risk = risk
         # Run-scoped plain-int counter: deterministic for a given order
         # stream and serializable into checkpoints.
         self._trade_seq = 0
@@ -77,14 +82,20 @@ class MatchingEngine:
         if order.side == "sell" and not self.config.allow_short:
             if not pf.can_sell(order.quantity):
                 return "insufficient inventory"
-        if order.side == "buy" and not self.config.allow_negative_cash:
-            if order.order_type == "limit":
-                if not pf.can_buy(self.book.snap(order.price), order.quantity):
-                    return "insufficient cash"
-            else:
-                ref = self.book.best_ask or self.book.mid_price()
-                if ref is not None and pf.available_cash < ref * self.config.min_order_size:
-                    return "insufficient cash"
+        if order.side == "buy":
+            if self.risk is not None:
+                reason = self.risk.check_order(
+                    order, self.book.best_ask or self.book.mid_price())
+                if reason is not None:
+                    return reason
+            elif not self.config.allow_negative_cash:
+                if order.order_type == "limit":
+                    if not pf.can_buy(self.book.snap(order.price), order.quantity):
+                        return "insufficient cash"
+                else:
+                    ref = self.book.best_ask or self.book.mid_price()
+                    if ref is not None and pf.available_cash < ref * self.config.min_order_size:
+                        return "insufficient cash"
         return None
 
     # ------------------------------------------------------------------
@@ -188,14 +199,22 @@ class MatchingEngine:
 
             qty = min(order.remaining, resting.remaining)
 
-            # Market buys are capped by the buyer's available cash.
-            if order.side == "buy" and order.order_type == "market" and not self.config.allow_negative_cash:
-                if exec_price <= 0:
-                    break
-                affordable = int(pf.available_cash // exec_price)
-                if affordable <= 0:
-                    break
-                qty = min(qty, affordable)
+            # Market buys are capped by margin headroom (risk enabled) or
+            # by the buyer's available cash (legacy strict semantics).
+            if order.side == "buy" and order.order_type == "market":
+                if self.risk is not None:
+                    cap = self.risk.market_buy_cap(order, exec_price)
+                    if cap is not None:
+                        if cap <= 0:
+                            break
+                        qty = min(qty, cap)
+                elif not self.config.allow_negative_cash:
+                    if exec_price <= 0:
+                        break
+                    affordable = int(pf.available_cash // exec_price)
+                    if affordable <= 0:
+                        break
+                    qty = min(qty, affordable)
 
             buyer_id = order.agent_id if order.side == "buy" else resting.agent_id
             seller_id = resting.agent_id if order.side == "buy" else order.agent_id
