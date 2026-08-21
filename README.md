@@ -175,15 +175,27 @@ Tezcat is an MVP artificial-market laboratory being hardened into a
 research-grade platform in gated phases. What is **implemented and tested**
 today: the market kernel, agent ecology, reservation accounting with
 conservation invariants, shocks/regimes, presets, REST API + dashboard, and
-(as of phases F1/F2) an explicit [financial-semantics contract](docs/semantics.md)
-and a [reproducibility contract](docs/reproducibility.md) — frozen hashed
-configs, run-scoped deterministic identifiers, state/event hashes, seed
-derivation, and per-run artifact manifests with checksums.
+the phased research infrastructure:
 
-Not yet implemented (target roadmap, not current facts): full event
-sourcing, checkpoints/forks/replay, Monte Carlo replications and factorial
-designs, statistical inference, microstructure/TCA metrics, leverage/margin/
-liquidation, and calibration against real data. Single-seed preset outputs
-are demonstrations, not evidence — see
+- **F1/F2** — [financial-semantics contract](docs/semantics.md) and
+  [reproducibility contract](docs/reproducibility.md): frozen hashed
+  configs, run-scoped deterministic identifiers, state/event hashes, seed
+  derivation, per-run artifact manifests with checksums
+- **F3** — [event sourcing, replay, checkpoints, forks](docs/events.md):
+  hash-chained canonical event log; replay rebuilds exact state from events
+  alone; bit-identical checkpoint restore; forks with declared
+  interventions and parent lineage
+- **F4/F5** — [research objects](docs/research_objects.md): validated
+  designs (control/treatments/factorials, ≥2 replications enforced),
+  immutable content-addressed experiment versions, lineage registry,
+  resumable idempotent batch execution with seed-level provenance
+- **F6** — [statistical analysis and reports](docs/analysis.md): seeded
+  bootstrap CIs, permutation tests, effect sizes, Holm correction, 2×2
+  interactions; reports rendered from artifacts only
+
+Not yet implemented (target roadmap, not current facts): microstructure/TCA
+metrics, leverage/margin/liquidation and stress labs, calibration against
+real data, distributed execution. Single-seed preset outputs are
+demonstrations, not evidence — see
 [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) for the frozen
 baseline and the audit trail.

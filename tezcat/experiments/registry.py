@@ -147,6 +147,28 @@ class Registry:
             return []
         return [r for p in sorted(d.glob("*.json")) if (r := self._read(p))]
 
+    # -- analyses and reports (written in Phase F6) --------------------
+    def save_analysis(self, version_id: str, analysis: Dict[str, Any]) -> None:
+        with self._lock:
+            self._write(self.root / "analysis" / f"{version_id}.json", analysis)
+
+    def get_analysis(self, version_id: str) -> Optional[Dict[str, Any]]:
+        return self._read(self.root / "analysis" / f"{version_id}.json")
+
+    def save_report(self, version_id: str, markdown: str,
+                    meta: Dict[str, Any]) -> None:
+        with self._lock:
+            path = self.root / "reports" / f"{version_id}.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(markdown)
+            os.replace(tmp, path)
+            self._write(self.root / "reports" / f"{version_id}.json", meta)
+
+    def get_report(self, version_id: str) -> Optional[str]:
+        path = self.root / "reports" / f"{version_id}.md"
+        return path.read_text() if path.exists() else None
+
     def save_batch_summary(self, batch_id: str, summary: Dict[str, Any]) -> None:
         with self._lock:
             self._write(self.root / "results" / batch_id / "summary" / "summary.json",
