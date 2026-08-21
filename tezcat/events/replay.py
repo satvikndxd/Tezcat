@@ -180,6 +180,20 @@ class ReplayKernel:
     def _on_intervention(self, step: int, d: Dict[str, Any]) -> None:
         pass  # lineage record
 
+    # Risk events (Phase F8) are forensic records: the forced orders they
+    # announce arrive as ordinary order/trade events with full semantics.
+    def _on_margin_call(self, step: int, d: Dict[str, Any]) -> None:
+        pass
+
+    def _on_margin_restored(self, step: int, d: Dict[str, Any]) -> None:
+        pass
+
+    def _on_liquidation(self, step: int, d: Dict[str, Any]) -> None:
+        pass
+
+    def _on_default(self, step: int, d: Dict[str, Any]) -> None:
+        pass
+
     # ------------------------------------------------------------------
     def _order_ref(self, order_id: str) -> Order:
         order = self._live.get(order_id) or self.book.get_order(order_id)
