@@ -19,12 +19,12 @@ Rules
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from tezcat.agents.portfolio import Portfolio
 from tezcat.core.config import MarketConfig
+from tezcat.events.log import EventLog
 from tezcat.market.order_book import Order, OrderBook
 
 
@@ -45,13 +45,19 @@ class OrderRejected(Exception):
 
 
 class MatchingEngine:
-    def __init__(self, book: OrderBook, portfolios: Dict[str, Portfolio], config: MarketConfig):
+    def __init__(self, book: OrderBook, portfolios: Dict[str, Portfolio],
+                 config: MarketConfig, events: Optional[EventLog] = None):
         self.book = book
         self.portfolios = portfolios
         self.config = config
-        # Run-scoped: trade IDs are deterministic for a given order stream,
-        # independent of how many engines ran earlier in this process.
-        self._trade_counter = itertools.count(1)
+        self.events = events
+        # Run-scoped plain-int counter: deterministic for a given order
+        # stream and serializable into checkpoints.
+        self._trade_seq = 0
+
+    def _emit(self, step: int, type_: str, **data) -> None:
+        if self.events is not None:
+            self.events.append(step, type_, data)
 
     # ------------------------------------------------------------------
     def validate(self, order: Order) -> Optional[str]:
@@ -88,6 +94,10 @@ class MatchingEngine:
         if reason is not None:
             order.status = "rejected"
             order.updated_step = step
+            self._emit(step, "order_rejected", order_id=order.order_id,
+                       agent_id=order.agent_id, side=order.side,
+                       order_type=order.order_type, price=order.price,
+                       quantity=order.quantity, reason=reason)
             return [], order
 
         pf = self.portfolios[order.agent_id]
@@ -95,10 +105,18 @@ class MatchingEngine:
             order.price = self.book.snap(order.price)
 
         # Reserve resources up-front so concurrent intents can't overspend.
+        reserved_cash, reserved_inv = 0.0, 0
         if order.side == "sell":
             pf.reserve_inventory(order.remaining)
+            reserved_inv = order.remaining
         elif order.order_type == "limit":
-            pf.reserve_cash(order.price * order.remaining)
+            reserved_cash = order.price * order.remaining
+            pf.reserve_cash(reserved_cash)
+        self._emit(step, "order_accepted", order_id=order.order_id,
+                   agent_id=order.agent_id, side=order.side,
+                   order_type=order.order_type, price=order.price,
+                   quantity=order.quantity, reserved_cash=reserved_cash,
+                   reserved_inventory=reserved_inv)
 
         trades = self._match(order, step)
 
@@ -109,12 +127,17 @@ class MatchingEngine:
                 order.updated_step = step
                 order.seq = self.book.next_seq()
                 self.book.add_limit(order)
+                self._emit(step, "order_rested", order_id=order.order_id,
+                           price=order.price, remaining=order.remaining,
+                           status=order.status, seq=order.seq)
             else:
                 # Unfilled market remainder is discarded; release reservations.
                 if order.side == "sell":
                     pf.release_inventory(order.remaining)
                 order.status = "partial" if trades else "cancelled"
                 order.updated_step = step
+                self._emit(step, "order_discarded", order_id=order.order_id,
+                           side=order.side, remaining=order.remaining)
         else:
             order.status = "filled"
             order.updated_step = step
@@ -158,6 +181,9 @@ class MatchingEngine:
                 cancelled = self.book.cancel(resting.order_id, step, status="cancelled")
                 if cancelled is not None:
                     self.release_on_cancel(cancelled)
+                    self._emit(step, "order_cancelled", order_id=cancelled.order_id,
+                               side=cancelled.side, price=cancelled.price,
+                               remaining=cancelled.remaining, reason="self_trade")
                 continue
 
             qty = min(order.remaining, resting.remaining)
@@ -183,18 +209,22 @@ class MatchingEngine:
             order.updated_step = step
             resting.updated_step = step
 
-            trades.append(
-                Trade(
-                    trade_id=f"trd_{next(self._trade_counter):08d}",
-                    step=step,
-                    price=exec_price,
-                    quantity=qty,
-                    buy_agent_id=buyer_id,
-                    sell_agent_id=seller_id,
-                    buy_order_id=buy_order.order_id,
-                    sell_order_id=sell_order.order_id,
-                )
+            self._trade_seq += 1
+            trade = Trade(
+                trade_id=f"trd_{self._trade_seq:08d}",
+                step=step,
+                price=exec_price,
+                quantity=qty,
+                buy_agent_id=buyer_id,
+                sell_agent_id=seller_id,
+                buy_order_id=buy_order.order_id,
+                sell_order_id=sell_order.order_id,
             )
+            trades.append(trade)
+            self._emit(step, "trade", trade_id=trade.trade_id, price=exec_price,
+                       quantity=qty, buy_order_id=buy_order.order_id,
+                       sell_order_id=sell_order.order_id,
+                       buy_agent_id=buyer_id, sell_agent_id=seller_id)
 
             if resting.remaining == 0:
                 resting.status = "filled"

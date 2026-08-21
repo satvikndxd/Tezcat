@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 from collections import deque
 from dataclasses import dataclass, field
 from statistics import median
@@ -38,8 +37,8 @@ class RegimeEngine:
         self.policy = policy
         self.current = Regime.STABLE
         self.events: List[RegimeEvent] = []
-        # Run-scoped: event IDs are deterministic per run, not process-global.
-        self._event_counter = itertools.count(1)
+        # Run-scoped plain-int counter: deterministic and checkpointable.
+        self._event_seq = 0
 
         lb = policy.lookback
         self._prices: deque = deque(maxlen=lb)
@@ -132,8 +131,9 @@ class RegimeEngine:
 
     # ------------------------------------------------------------------
     def _transition(self, step: int, target: Regime, reason: str, metrics: Dict[str, Any]) -> None:
+        self._event_seq += 1
         ev = RegimeEvent(
-            event_id=f"rgm_{next(self._event_counter):06d}",
+            event_id=f"rgm_{self._event_seq:06d}",
             run_id=self.run_id,
             step=step,
             previous_regime=self.current.value,
@@ -148,3 +148,34 @@ class RegimeEngine:
         self._calm_steps = 0
         if target == Regime.CRISIS:
             self._crisis_peak_vol = 0.0
+
+    # -- checkpoint support (Phase F3) ---------------------------------
+    def state_dict(self) -> Dict[str, Any]:
+        return {
+            "current": self.current.value,
+            "event_seq": self._event_seq,
+            "prices": list(self._prices),
+            "spreads": list(self._spreads),
+            "depths": list(self._depths),
+            "baseline_spread": self._baseline_spread,
+            "baseline_depth": self._baseline_depth,
+            "crisis_peak_vol": self._crisis_peak_vol,
+            "confirm_count": self._confirm_count,
+            "pending": self._pending.value if self._pending is not None else None,
+            "calm_steps": self._calm_steps,
+            "events": [e.to_dict() for e in self.events],
+        }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        self.current = Regime(state["current"])
+        self._event_seq = state["event_seq"]
+        self._prices.clear(); self._prices.extend(state["prices"])
+        self._spreads.clear(); self._spreads.extend(state["spreads"])
+        self._depths.clear(); self._depths.extend(state["depths"])
+        self._baseline_spread = state["baseline_spread"]
+        self._baseline_depth = state["baseline_depth"]
+        self._crisis_peak_vol = state["crisis_peak_vol"]
+        self._confirm_count = state["confirm_count"]
+        self._pending = Regime(state["pending"]) if state["pending"] is not None else None
+        self._calm_steps = state["calm_steps"]
+        self.events = [RegimeEvent(**e) for e in state["events"]]

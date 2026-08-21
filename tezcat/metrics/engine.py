@@ -104,6 +104,47 @@ class MetricsEngine:
         self.step_metrics.append(row)
         return row
 
+    # -- checkpoint support (Phase F3) ---------------------------------
+    def state_dict(self) -> Dict[str, Any]:
+        return {
+            "returns_window": list(self._returns_window),
+            "prices_window": list(self._prices_window),
+            "last_price": self._last_price,
+            "peak_price": self._peak_price,
+            "max_drawdown": self._max_drawdown,
+            "sum_spread": self._sum_spread,
+            "n_spread": self._n_spread,
+            "total_volume": self._total_volume,
+            "total_trades": self._total_trades,
+            "sum_sq_returns": self._sum_sq_returns,
+            "n_returns": self._n_returns,
+            "spread_history": list(self._spread_history),
+            "baseline_spread": self._baseline_spread,
+            "min_depth_frac": self._min_depth_frac,
+            "baseline_depth": self._baseline_depth,
+            "max_spread_mult": self._max_spread_mult,
+            "step_metrics": self.step_metrics,
+        }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        self._returns_window.clear(); self._returns_window.extend(state["returns_window"])
+        self._prices_window.clear(); self._prices_window.extend(state["prices_window"])
+        self._last_price = state["last_price"]
+        self._peak_price = state["peak_price"]
+        self._max_drawdown = state["max_drawdown"]
+        self._sum_spread = state["sum_spread"]
+        self._n_spread = state["n_spread"]
+        self._total_volume = state["total_volume"]
+        self._total_trades = state["total_trades"]
+        self._sum_sq_returns = state["sum_sq_returns"]
+        self._n_returns = state["n_returns"]
+        self._spread_history.clear(); self._spread_history.extend(state["spread_history"])
+        self._baseline_spread = state["baseline_spread"]
+        self._min_depth_frac = state["min_depth_frac"]
+        self._baseline_depth = state["baseline_depth"]
+        self._max_spread_mult = state["max_spread_mult"]
+        self.step_metrics = list(state["step_metrics"])
+
     # ------------------------------------------------------------------
     def build_report(self, run_id: str, agents: List[Any], last_price: float,
                      shock_count: int, regime_events: List[Any],

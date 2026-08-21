@@ -14,7 +14,6 @@ Step sequence (per step):
 from __future__ import annotations
 
 import hashlib
-import itertools
 import random
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +23,9 @@ from tezcat.agents import traders  # noqa: F401  (registers agent types)
 from tezcat.core.config import (
     SCHEMA_VERSION, ExperimentConfig, Regime, ShockConfig, ShockType, canonical_json,
 )
+from tezcat.core.config import config_hash as _config_hash
+from tezcat.core.state_hash import compute_state_hash
+from tezcat.events.log import EventLog
 from tezcat.market.matching import MatchingEngine, Trade
 from tezcat.market.order_book import Order, OrderBook
 from tezcat.metrics.engine import MetricsEngine
@@ -31,6 +33,9 @@ from tezcat.regimes.engine import RegimeEngine
 from tezcat.shocks.engine import EnvironmentState, ShockEngine
 
 WHALE_ID = "whale"
+
+#: Bump on any change to the checkpoint layout.
+CHECKPOINT_VERSION = 1
 
 
 class EcologyEngine:
@@ -47,7 +52,9 @@ class EcologyEngine:
         self.book = OrderBook(mc.tick_size)
         self.portfolios: Dict[str, Portfolio] = {}
         self.agents: List[BaseAgent] = []
-        self._order_counter = itertools.count(1)
+        # Run-scoped plain-int counter: deterministic and checkpointable.
+        self._order_seq = 0
+        self.events_log = EventLog(run_id)
 
         for gi, group in enumerate(config.agents):
             for i in range(group.count):
@@ -63,7 +70,8 @@ class EcologyEngine:
         self._expected_total_inventory = sum(p.inventory for p in self.portfolios.values())
 
         self.env = EnvironmentState()
-        self.matching = MatchingEngine(self.book, self.portfolios, mc)
+        self.matching = MatchingEngine(self.book, self.portfolios, mc,
+                                       events=self.events_log)
         self.shocks = ShockEngine(run_id, config.shocks, self.env)
         self.regimes = RegimeEngine(run_id, config.regime_policy)
         self.metrics = MetricsEngine(run_id, config.metrics_policy, mc.initial_price)
@@ -78,7 +86,8 @@ class EcologyEngine:
 
     # ------------------------------------------------------------------
     def _next_order_id(self) -> str:
-        return f"ord_{next(self._order_counter):08d}"
+        self._order_seq += 1
+        return f"ord_{self._order_seq:08d}"
 
     def _market_brief(self) -> Dict[str, Any]:
         return {
@@ -101,7 +110,8 @@ class EcologyEngine:
             # Execute the first whale slice immediately so before/after differ.
             self._run_whale_slices()
             after = self._market_brief()
-            self.shocks.record(cfg, self.step_num, reason, payload, before, after)
+            ev = self.shocks.record(cfg, self.step_num, reason, payload, before, after)
+            self.events_log.append(self.step_num, "shock", ev.to_dict())
 
     def _run_whale_slices(self) -> None:
         """Execute the per-step quantity of each active whale program."""
@@ -148,6 +158,9 @@ class EcologyEngine:
             cancelled = self.book.cancel(order.order_id, self.step_num, status="expired")
             if cancelled is not None:
                 self.matching.release_on_cancel(cancelled)
+                self.events_log.append(self.step_num, "order_expired", {
+                    "order_id": cancelled.order_id, "side": cancelled.side,
+                    "price": cancelled.price, "remaining": cancelled.remaining})
 
     # ------------------------------------------------------------------
     def _build_view(self) -> MarketView:
@@ -181,6 +194,10 @@ class EcologyEngine:
                 cancelled = self.book.cancel(intent.cancel_order_id, self.step_num)
                 if cancelled is not None:
                     self.matching.release_on_cancel(cancelled)
+                    self.events_log.append(self.step_num, "order_cancelled", {
+                        "order_id": cancelled.order_id, "side": cancelled.side,
+                        "price": cancelled.price, "remaining": cancelled.remaining,
+                        "reason": "agent"})
                 if intent.cancel_order_id in agent.open_order_ids:
                     agent.open_order_ids.remove(intent.cancel_order_id)
             return
@@ -214,11 +231,14 @@ class EcologyEngine:
         self._run_whale_slices()
 
         # 3. regime evaluation (uses last step's metrics)
+        n_regime_events = len(self.regimes.events)
         self.regimes.observe(
             step, self.last_price, self.book.spread,
             self.book.bid_depth() + self.book.ask_depth(),
             self.metrics.rolling_volatility,
         )
+        for ev in self.regimes.events[n_regime_events:]:
+            self.events_log.append(step, "regime_transition", ev.to_dict())
         self.regime_step_counts[self.regimes.current.value] += 1
 
         # 4. expire stale orders
@@ -261,6 +281,12 @@ class EcologyEngine:
             "regime": self.regimes.current.value,
         }
         self.snapshots.append(snapshot)
+        # End-of-step environment record: lets event replay reconstruct
+        # non-book state (env decay, regime) without re-simulating agents.
+        self.events_log.append(step, "step_ended", {
+            "last_price": self.last_price, "sentiment": self.env.sentiment,
+            "mm_withdrawn": self.env.mm_withdrawn,
+            "regime": self.regimes.current.value})
 
         # 8. termination
         if step >= self.config.total_steps:
@@ -332,30 +358,13 @@ class EcologyEngine:
         environment state, regime, step counter, and last price. Floats are
         encoded with ``repr`` (shortest exact round-trip form), so two states
         hash equal iff they are bit-identical, and the hash is stable across
-        fresh processes.
+        fresh processes. Shared with the event-replay kernel
+        (tezcat.core.state_hash) so replay is checked against the same
+        definition.
         """
-        def side_state(side):
-            ticks = side.sorted_ticks
-            return [
-                [t, [[o.order_id, o.agent_id, o.remaining, o.seq, o.status]
-                     for o in side.levels[t]]]
-                for t in ticks
-            ]
-
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "step": self.step_num,
-            "last_price": repr(self.last_price),
-            "book": {"bids": side_state(self.book.bids), "asks": side_state(self.book.asks)},
-            "portfolios": {
-                aid: [repr(p.cash), p.inventory, repr(p.reserved_cash),
-                      p.reserved_inventory, repr(p.realized_pnl), repr(p.avg_cost)]
-                for aid, p in sorted(self.portfolios.items())
-            },
-            "env": {"sentiment": repr(self.env.sentiment), "mm_withdrawn": self.env.mm_withdrawn},
-            "regime": self.regimes.current.value,
-        }
-        return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
+        return compute_state_hash(
+            self.book, self.portfolios, self.step_num, self.last_price,
+            self.env.sentiment, self.env.mm_withdrawn, self.regimes.current.value)
 
     def event_hash(self) -> str:
         """Canonical hash of the recorded event/output sequence.
@@ -372,3 +381,196 @@ class EcologyEngine:
             "regime_events": [e.to_dict() for e in self.regimes.events],
         }
         return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
+
+    # ------------------------------------------------------------------
+    # Checkpoints and forks (Phase F3)
+    # ------------------------------------------------------------------
+    def checkpoint(self) -> Dict[str, Any]:
+        """Serializable snapshot of the complete kernel state.
+
+        Checkpoints are inter-step: call between step() invocations. The
+        returned dict is strictly JSON-native and round-trips bit-identically
+        (Python floats survive JSON exactly). Restoring and continuing must
+        reproduce the uninterrupted run's hashes — enforced by tests.
+        """
+        def order_state(o: Order) -> Dict[str, Any]:
+            return {"order_id": o.order_id, "agent_id": o.agent_id, "side": o.side,
+                    "order_type": o.order_type, "price": o.price,
+                    "quantity": o.quantity, "remaining": o.remaining,
+                    "status": o.status, "created_step": o.created_step,
+                    "updated_step": o.updated_step, "seq": o.seq}
+
+        def portfolio_state(p: Portfolio) -> Dict[str, Any]:
+            return {"cash": p.cash, "inventory": p.inventory,
+                    "reserved_cash": p.reserved_cash,
+                    "reserved_inventory": p.reserved_inventory,
+                    "realized_pnl": p.realized_pnl, "avg_cost": p.avg_cost,
+                    "initial_cash": p.initial_cash,
+                    "initial_inventory": p.initial_inventory}
+
+        rng_state = self.rng.getstate()
+        return {
+            "checkpoint_version": CHECKPOINT_VERSION,
+            "schema_version": SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "config_hash": _config_hash(self.config),
+            "seed": self.seed,
+            "step": self.step_num,
+            "done": self.done,
+            "failed": self.failed,
+            "rng_state": [rng_state[0], list(rng_state[1]), rng_state[2]],
+            "order_seq": self._order_seq,
+            "trade_seq": self.matching._trade_seq,
+            "book_seq": self.book._seq,
+            "last_price": self.last_price,
+            "last_log_return": self._last_log_return,
+            "book": {
+                "bids": [order_state(o) for o in self.book.bids.all_orders()],
+                "asks": [order_state(o) for o in self.book.asks.all_orders()],
+            },
+            "portfolios": {aid: portfolio_state(p)
+                           for aid, p in sorted(self.portfolios.items())},
+            "agents": [{
+                "agent_id": a.agent_id,
+                "memory": {k: getattr(a.memory, k) for k in (
+                    "confidence", "fear", "recent_loss", "trend_belief",
+                    "value_belief", "volatility_estimate", "last_equity")},
+                "open_order_ids": list(a.open_order_ids),
+            } for a in self.agents],
+            "env": {"sentiment": self.env.sentiment,
+                    "mm_withdrawn": self.env.mm_withdrawn,
+                    "sentiment_decay": self.env._sentiment_decay,
+                    "mm_withdraw_until": self.env._mm_withdraw_until,
+                    "sentiment_until": self.env._sentiment_until},
+            "shocks": self.shocks.state_dict(),
+            "regimes": self.regimes.state_dict(),
+            "metrics": self.metrics.state_dict(),
+            "events_log": self.events_log.state_dict(),
+            "trades": self.trades,
+            "snapshots": self.snapshots,
+            "regime_step_counts": dict(self.regime_step_counts),
+            "expected_total_cash": self._expected_total_cash,
+            "expected_total_inventory": self._expected_total_inventory,
+        }
+
+    @classmethod
+    def restore(cls, checkpoint: Dict[str, Any], config: ExperimentConfig,
+                run_id: Optional[str] = None) -> "EcologyEngine":
+        """Rebuild an engine from a checkpoint.
+
+        ``config`` must hash-match the checkpoint's recorded config; a fork
+        keeps the parent's config but takes a new ``run_id``.
+        """
+        if checkpoint.get("checkpoint_version") != CHECKPOINT_VERSION:
+            raise ValueError(
+                f"incompatible checkpoint version "
+                f"{checkpoint.get('checkpoint_version')} (runtime implements "
+                f"{CHECKPOINT_VERSION})")
+        if _config_hash(config) != checkpoint["config_hash"]:
+            raise ValueError(
+                "config does not match checkpoint config_hash; restoring under "
+                "a different config is undefined — create a new experiment")
+
+        eng = cls(run_id or checkpoint["run_id"], config, checkpoint["seed"])
+        eng.step_num = checkpoint["step"]
+        eng.done = checkpoint["done"]
+        eng.failed = checkpoint["failed"]
+        rs = checkpoint["rng_state"]
+        eng.rng.setstate((rs[0], tuple(rs[1]), rs[2]))
+        eng._order_seq = checkpoint["order_seq"]
+        eng.matching._trade_seq = checkpoint["trade_seq"]
+        eng.last_price = checkpoint["last_price"]
+        eng._last_log_return = checkpoint["last_log_return"]
+        eng._expected_total_cash = checkpoint["expected_total_cash"]
+        eng._expected_total_inventory = checkpoint["expected_total_inventory"]
+
+        # Portfolios: mutate in place (agents share these exact objects).
+        for aid, ps in checkpoint["portfolios"].items():
+            p = eng.portfolios[aid]
+            for k, v in ps.items():
+                setattr(p, k, v)
+
+        # Book: re-insert resting orders preserving both price-level FIFO
+        # order (within each level) and *arrival order* in the order-ID map —
+        # expiry iterates that map, so its insertion order is semantic.
+        restored_orders = []
+        for side_name, side in (("bids", eng.book.bids), ("asks", eng.book.asks)):
+            for os_ in checkpoint["book"][side_name]:
+                order = Order(**os_)
+                tick = eng.book.to_tick(order.price)
+                side.add(tick, order)
+                restored_orders.append((order, tick))
+        restored_orders.sort(key=lambda ot: ot[0].seq)  # seq == arrival order
+        eng.book._orders = {o.order_id: (o, t) for o, t in restored_orders}
+        eng.book._seq = checkpoint["book_seq"]
+
+        # Agents: restore memory and open-order references by id.
+        agent_state = {a["agent_id"]: a for a in checkpoint["agents"]}
+        for a in eng.agents:
+            st = agent_state[a.agent_id]
+            for k, v in st["memory"].items():
+                setattr(a.memory, k, v)
+            a.open_order_ids = list(st["open_order_ids"])
+
+        env = checkpoint["env"]
+        eng.env.sentiment = env["sentiment"]
+        eng.env.mm_withdrawn = env["mm_withdrawn"]
+        eng.env._sentiment_decay = env["sentiment_decay"]
+        eng.env._mm_withdraw_until = env["mm_withdraw_until"]
+        eng.env._sentiment_until = env["sentiment_until"]
+
+        eng.shocks.load_state(checkpoint["shocks"])
+        eng.regimes.load_state(checkpoint["regimes"])
+        eng.metrics.load_state(checkpoint["metrics"])
+        eng.events_log.load_state(checkpoint["events_log"])
+        eng.trades = list(checkpoint["trades"])
+        eng.snapshots = list(checkpoint["snapshots"])
+        eng.regime_step_counts = dict(checkpoint["regime_step_counts"])
+
+        # New identity for forked children; sub-engines emit under it.
+        eng.shocks.run_id = eng.run_id
+        eng.regimes.run_id = eng.run_id
+        eng.metrics.run_id = eng.run_id
+        eng.events_log.run_id = eng.run_id
+        return eng
+
+    @classmethod
+    def fork(cls, checkpoint: Dict[str, Any], config: ExperimentConfig,
+             new_run_id: str, intervention: Optional[Dict[str, Any]] = None,
+             ) -> "EcologyEngine":
+        """Create a child run from a parent checkpoint with a declared
+        intervention.
+
+        The child shares the parent's exact event prefix (the restored event
+        chain continues from the parent's chain head) and diverges only
+        through the recorded intervention. Supported operations:
+
+        - {"op": "inject_shock", "shock_type", "side"?, "magnitude", "duration"?}
+        - {"op": "set_sentiment", "value", "duration"}
+        - {"op": "withdraw_mm", "duration"}
+        """
+        from tezcat.checkpoints import checkpoint_hash
+
+        eng = cls.restore(checkpoint, config, run_id=new_run_id)
+        intervention = intervention or {"name": "none", "operations": []}
+        eng.events_log.append(eng.step_num, "intervention", {
+            "name": intervention.get("name", "unnamed"),
+            "operations": intervention.get("operations", []),
+            "parent_run_id": checkpoint["run_id"],
+            "checkpoint_step": checkpoint["step"],
+            "checkpoint_hash": checkpoint_hash(checkpoint),
+        })
+        for op in intervention.get("operations", []):
+            kind = op["op"]
+            if kind == "inject_shock":
+                eng.shocks.inject_manual(op["shock_type"], op.get("side"),
+                                         op["magnitude"], op.get("duration"))
+            elif kind == "set_sentiment":
+                eng.env.sentiment = max(-1.0, min(1.0, float(op["value"])))
+                eng.env._sentiment_until = eng.step_num + int(op["duration"])
+            elif kind == "withdraw_mm":
+                eng.env.mm_withdrawn = True
+                eng.env._mm_withdraw_until = eng.step_num + int(op["duration"])
+            else:
+                raise ValueError(f"unknown intervention op {kind!r}")
+        return eng
