@@ -168,3 +168,22 @@ Set `TEZCAT_STORE=aws` to switch persistence.
 3. **Economic invariants** — cash & assets are conserved; reservations prevent overcommitment; verified by `check_invariants()` and tests.
 4. **Engines are independent** — the core engine has zero AWS/HTTP dependencies.
 5. **Events, not just state** — orders, trades, shocks, regime transitions are all logged.
+
+## Implementation status vs. research roadmap
+
+Tezcat is an MVP artificial-market laboratory being hardened into a
+research-grade platform in gated phases. What is **implemented and tested**
+today: the market kernel, agent ecology, reservation accounting with
+conservation invariants, shocks/regimes, presets, REST API + dashboard, and
+(as of phases F1/F2) an explicit [financial-semantics contract](docs/semantics.md)
+and a [reproducibility contract](docs/reproducibility.md) — frozen hashed
+configs, run-scoped deterministic identifiers, state/event hashes, seed
+derivation, and per-run artifact manifests with checksums.
+
+Not yet implemented (target roadmap, not current facts): full event
+sourcing, checkpoints/forks/replay, Monte Carlo replications and factorial
+designs, statistical inference, microstructure/TCA metrics, leverage/margin/
+liquidation, and calibration against real data. Single-seed preset outputs
+are demonstrations, not evidence — see
+[docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) for the frozen
+baseline and the audit trail.
