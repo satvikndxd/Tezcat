@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import itertools
 import math
 from collections import deque
 from typing import Any, Dict, List, Optional
 
 from tezcat.core.config import MetricsPolicy
-
-_report_counter = itertools.count(1)
 
 
 class MetricsEngine:
@@ -135,7 +132,8 @@ class MetricsEngine:
 
         total_regime_steps = sum(regime_step_counts.values()) or 1
         report = {
-            "report_id": f"rpt_{next(_report_counter):06d}",
+            # Deterministic: one report per run, addressed by the run itself.
+            "report_id": f"rpt_{run_id}",
             "run_id": run_id,
             "initial_price": round(self.initial_price, 4),
             "final_price": round(last_price, 4),

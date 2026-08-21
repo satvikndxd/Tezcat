@@ -44,10 +44,14 @@ def determinism_check(pid: str = "flash_crash"):
     pa = [s["last_price"] for s in a.snapshots]
     pb = [s["last_price"] for s in b.snapshots]
     assert pa == pb, "determinism violated!"
+    # F2 contract: full event/state hash equality, not just price paths.
+    # (run_id differs between a and b, so compare hashes that exclude it.)
+    assert a.state_hash() == b.state_hash(), "state hash determinism violated!"
     c = EcologyEngine("det_c", cfg, 8)
     while not c.done:
         c.step()
     pc = [s["last_price"] for s in c.snapshots]
+    assert a.state_hash() != c.state_hash(), "different seeds must diverge!"
     print(f"\ndeterminism: same seed identical = True; diff seed differs = {pa != pc}")
 
 

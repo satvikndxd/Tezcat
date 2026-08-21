@@ -119,6 +119,11 @@ class OrderBook:
 
     def add_limit(self, order: Order) -> None:
         assert order.order_type == "limit" and order.price is not None
+        if order.order_id in self._orders:
+            # Duplicate IDs would corrupt cancellation and reservation
+            # accounting; the matching engine rejects them at validation, so
+            # reaching this point is a caller bug and must fail loudly.
+            raise ValueError(f"duplicate order id {order.order_id!r}")
         tick = self.to_tick(order.price)
         order.price = self.to_price(tick)
         side = self.bids if order.side == "buy" else self.asks
@@ -126,16 +131,27 @@ class OrderBook:
         self._orders[order.order_id] = (order, tick)
 
     def cancel(self, order_id: str, step: int, status: str = "cancelled") -> Optional[Order]:
-        entry = self._orders.pop(order_id, None)
+        """Remove a resting order. Returns it, or None if unknown.
+
+        The order-ID record is only dropped *after* successful removal from
+        the book side. A tracked order that cannot be found on its side means
+        the book is internally corrupt; that raises instead of silently
+        leaking the caller's reservations.
+        """
+        entry = self._orders.get(order_id)
         if entry is None:
             return None
         order, tick = entry
         side = self.bids if order.side == "buy" else self.asks
-        if side.remove_order(order, tick):
-            order.status = status
-            order.updated_step = step
-            return order
-        return None
+        if not side.remove_order(order, tick):
+            raise RuntimeError(
+                f"order book inconsistency: {order_id!r} is tracked but absent "
+                f"from the {order.side} side at tick {tick}"
+            )
+        del self._orders[order_id]
+        order.status = status
+        order.updated_step = step
+        return order
 
     def remove_filled(self, order: Order) -> None:
         self._orders.pop(order.order_id, None)

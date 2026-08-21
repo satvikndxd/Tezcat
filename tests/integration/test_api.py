@@ -78,9 +78,31 @@ def test_full_lifecycle(client):
     assert report["run_id"] == run["run_id"]
     assert "agent_pnl_by_type" in report
 
+    # provenance (Phase F2): report is traceable to config, seed, and hashes
+    prov = report["provenance"]
+    assert prov["config_hash"] == exp["config_hash"]
+    assert prov["seed"] == 11
+    assert len(prov["state_hash"]) == 64
+    assert len(prov["event_hash"]) == 64
+
     # export
     export = client.post(f"/api/runs/{run['run_id']}/export").json()
     assert export["files"]
+
+
+def test_stale_experiment_hash_refused(client):
+    """A stored experiment whose config no longer matches its hash must not run."""
+    resp = client.post("/api/presets/stable_baseline/experiments", json={
+        "name": "stale", "overrides": {"total_steps": 100, "step_delay_ms": 0, "shocks": []}})
+    exp = resp.json()
+    # Corrupt the stored hash to simulate a hand-edited/stale record.
+    from tezcat.api import app as app_module
+    stored = app_module.store.load_experiment(exp["experiment_id"])
+    stored["config_hash"] = "0" * 64
+    app_module.store.save_experiment(stored)
+    r = client.post(f"/api/experiments/{exp['experiment_id']}/runs", json={"seed": 1})
+    assert r.status_code == 409
+    assert "config_hash" in r.json()["detail"]
 
 
 def test_incremental_history_polling(client):

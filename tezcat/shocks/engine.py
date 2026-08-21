@@ -12,9 +12,6 @@ from typing import Any, Dict, List, Optional
 
 from tezcat.core.config import ShockConfig, ShockTrigger, ShockType
 
-_event_counter = itertools.count(1)
-
-
 @dataclass
 class EnvironmentState:
     """Mutable shared state that shocks act on and agents observe."""
@@ -68,6 +65,8 @@ class ShockEngine:
         self.events: List[ShockEvent] = []
         self._manual_queue: List[ShockConfig] = []
         self._manual_counter = itertools.count(1)
+        # Run-scoped: event IDs are deterministic per run, not process-global.
+        self._event_counter = itertools.count(1)
         # Active whale programs: {"side", "remaining", "per_step", "until"}
         self.active_whales: List[Dict[str, Any]] = []
 
@@ -139,7 +138,7 @@ class ShockEngine:
     def record(self, cfg: ShockConfig, step: int, reason: str, payload: Dict[str, Any],
                before: Dict[str, Any], after: Dict[str, Any]) -> ShockEvent:
         ev = ShockEvent(
-            event_id=f"shk_{next(_event_counter):06d}",
+            event_id=f"shk_{next(self._event_counter):06d}",
             run_id=self.run_id,
             step=step,
             shock_id=cfg.shock_id,
