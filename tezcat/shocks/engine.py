@@ -6,7 +6,6 @@ mm_withdrawal) or by submitting orders from a dedicated whale participant.
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -64,9 +63,9 @@ class ShockEngine:
         self.env = env
         self.events: List[ShockEvent] = []
         self._manual_queue: List[ShockConfig] = []
-        self._manual_counter = itertools.count(1)
-        # Run-scoped: event IDs are deterministic per run, not process-global.
-        self._event_counter = itertools.count(1)
+        # Run-scoped plain-int counters: deterministic and checkpointable.
+        self._manual_seq = 0
+        self._event_seq = 0
         # Active whale programs: {"side", "remaining", "per_step", "until"}
         self.active_whales: List[Dict[str, Any]] = []
 
@@ -100,8 +99,9 @@ class ShockEngine:
     # ------------------------------------------------------------------
     def inject_manual(self, shock_type: str, side: Optional[str], magnitude: float,
                       duration: Optional[int]) -> ShockConfig:
+        self._manual_seq += 1
         cfg = ShockConfig(
-            shock_id=f"manual_{next(self._manual_counter)}",
+            shock_id=f"manual_{self._manual_seq}",
             shock_type=ShockType(shock_type),
             trigger=ShockTrigger(kind="manual"),
             side=side,
@@ -137,8 +137,9 @@ class ShockEngine:
 
     def record(self, cfg: ShockConfig, step: int, reason: str, payload: Dict[str, Any],
                before: Dict[str, Any], after: Dict[str, Any]) -> ShockEvent:
+        self._event_seq += 1
         ev = ShockEvent(
-            event_id=f"shk_{next(self._event_counter):06d}",
+            event_id=f"shk_{self._event_seq:06d}",
             run_id=self.run_id,
             step=step,
             shock_id=cfg.shock_id,
@@ -150,3 +151,20 @@ class ShockEngine:
         )
         self.events.append(ev)
         return ev
+
+    # -- checkpoint support (Phase F3) ---------------------------------
+    def state_dict(self) -> Dict[str, Any]:
+        return {
+            "manual_seq": self._manual_seq,
+            "event_seq": self._event_seq,
+            "manual_queue": [c.model_dump(mode="json") for c in self._manual_queue],
+            "active_whales": [dict(w) for w in self.active_whales],
+            "events": [e.to_dict() for e in self.events],
+        }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        self._manual_seq = state["manual_seq"]
+        self._event_seq = state["event_seq"]
+        self._manual_queue = [ShockConfig.model_validate(c) for c in state["manual_queue"]]
+        self.active_whales = [dict(w) for w in state["active_whales"]]
+        self.events = [ShockEvent(**e) for e in state["events"]]

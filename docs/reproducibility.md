@@ -49,7 +49,21 @@ nondeterminism.
 - Live-run pause/resume/shock-injection makes a run's event stream depend on
   operator actions; such runs are demonstrations. Only untouched runs are
   reproducible research objects.
-- Checkpoint/restore and event replay are Phase F3.
+
+## Phase F3 additions
+
+- Every run now records a hash-chained canonical event log
+  (`events/events.json`; chain head in the manifest as `event_log_chain`).
+  Replay of the log alone reconstructs the exact market state — see
+  [docs/events.md](events.md).
+- Checkpoints capture complete kernel state; restore + continue is
+  bit-identical to the uninterrupted run. Forks record parent lineage
+  (`parent_run_id`, `checkpoint_step`, `checkpoint_hash`) in an
+  `intervention` event.
+- A forked child's event chain continues from the parent's chain head under
+  the child's run id; `verify_chain` over the child's full log therefore
+  validates only for the parent-prefix + child-suffix pair, which is the
+  intended lineage semantics.
 
 ## Hash canonicalization rules
 

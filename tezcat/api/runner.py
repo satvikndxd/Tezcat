@@ -87,6 +87,7 @@ class RunManager:
                     "seed": run.seed,
                     "state_hash": engine.state_hash(),
                     "event_hash": engine.event_hash(),
+                    "event_log_chain": engine.events_log.chain,
                 }
                 run.status = "completed"
                 run.completed_at = _now()
@@ -107,6 +108,12 @@ class RunManager:
         prefix = run.s3_prefix or f"runs/{run.run_id}"
         artifacts = {
             "report/report.json": lr.report,
+            "events/events.json": {
+                "event_schema_version": 1,
+                "chain_hash": engine.events_log.chain,
+                "count": len(engine.events_log),
+                "events": engine.events_log.events,
+            },
             "trades/trades.json": engine.trades,
             "snapshots/snapshots.json": engine.snapshots,
             "metrics/step_metrics.json": engine.metrics.step_metrics,
@@ -127,6 +134,7 @@ class RunManager:
             "code_version": __version__,
             "state_hash": engine.state_hash(),
             "event_hash": engine.event_hash(),
+            "event_log_chain": engine.events_log.chain,
             "artifact_checksums": checksums,
         })
 

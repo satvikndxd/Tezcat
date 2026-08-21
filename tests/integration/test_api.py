@@ -78,12 +78,20 @@ def test_full_lifecycle(client):
     assert report["run_id"] == run["run_id"]
     assert "agent_pnl_by_type" in report
 
-    # provenance (Phase F2): report is traceable to config, seed, and hashes
+    # provenance (Phase F2/F3): report is traceable to config, seed, hashes,
+    # and the canonical event-log chain
     prov = report["provenance"]
     assert prov["config_hash"] == exp["config_hash"]
     assert prov["seed"] == 11
     assert len(prov["state_hash"]) == 64
     assert len(prov["event_hash"]) == 64
+    assert len(prov["event_log_chain"]) == 64
+
+    # events artifact (Phase F3): persisted, chained, and replayable
+    from tezcat.api import app as app_module
+    ev_art = app_module.store.load_artifact(run["s3_prefix"], "events/events.json")
+    assert ev_art["count"] == len(ev_art["events"]) > 0
+    assert ev_art["chain_hash"] == prov["event_log_chain"]
 
     # export
     export = client.post(f"/api/runs/{run['run_id']}/export").json()
