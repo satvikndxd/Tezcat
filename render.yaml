@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: tezcat-public-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: TEZCAT_STORE
+        value: local
+      - key: TEZCAT_DATA_DIR
+        value: /data
+      - key: TEZCAT_PUBLIC_DEMO
+        value: "true"
+      - key: TEZCAT_PUBLIC_MAX_RUNS
+        value: "60"
+      - key: TEZCAT_PUBLIC_MAX_STEPS
+        value: "5000"
+      - key: TEZCAT_PUBLIC_MAX_ACTIVE_BATCHES
+        value: "1"
+      - key: TEZCAT_PUBLIC_MAX_ACTIVE_RUNS
+        value: "1"
+      - key: TEZCAT_PUBLIC_MAX_SERIES
+        value: "2000"
+      - key: TEZCAT_CORS_ORIGINS
+        value: "https://satvikndxd.github.io,http://localhost:5173,http://localhost:4173"

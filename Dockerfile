@@ -1,4 +1,4 @@
-FROM node:22-slim AS frontend
+FROM node:20-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -10,8 +10,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY tezcat/ tezcat/
-COPY --from=frontend /app/frontend/dist frontend/dist
+COPY scripts/ scripts/
+COPY examples/ examples/
+COPY --from=frontend-build /app/frontend/dist frontend/dist
 ENV TEZCAT_STORE=local TEZCAT_DATA_DIR=/data
 VOLUME /data
 EXPOSE 8000
-CMD ["uvicorn", "tezcat.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn tezcat.api.app:app --host 0.0.0.0 --port ${PORT:-8000}"]

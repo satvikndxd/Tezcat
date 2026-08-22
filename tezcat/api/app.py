@@ -27,12 +27,66 @@ from tezcat.api.runner import RunManager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("tezcat.api")
 
+
+def _csv_env(name: str, default: List[str]) -> List[str]:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    values = [item.strip() for item in raw.split(",") if item.strip()]
+    return values or default
+
+
+_PUBLIC_DEMO = os.environ.get("TEZCAT_PUBLIC_DEMO", "").lower() in {"1", "true", "yes"}
+
+
+def _public_limit(name: str, default: Optional[int] = None) -> Optional[int]:
+    """Return a deployment-only cap; no cap is applied during local development."""
+    if not _PUBLIC_DEMO:
+        return None
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        log.warning("invalid integer for %s=%r; using default %r", name, raw, default)
+        return default
+
+
+def _ensure_public_config_limit(config: ExperimentConfig) -> None:
+    max_steps = _public_limit("TEZCAT_PUBLIC_MAX_STEPS", 5_000)
+    if max_steps is not None and config.total_steps > max_steps:
+        raise HTTPException(
+            422,
+            f"public demo limit: total_steps must be <= {max_steps}",
+        )
+
+
+def _ensure_public_design_limit(planned_runs: int) -> None:
+    max_runs = _public_limit("TEZCAT_PUBLIC_MAX_RUNS", 60)
+    if max_runs is not None and planned_runs > max_runs:
+        raise HTTPException(
+            422,
+            f"public demo limit: planned runs must be <= {max_runs}",
+        )
+
+
+def _bounded_query_limit(value: int, env_name: str, default: int) -> int:
+    cap = _public_limit(env_name, default)
+    return min(value, cap) if cap is not None else value
+
+
 store = get_store()
 runner = RunManager(store)
 
 app = FastAPI(title="Tezcat", version=__version__,
               description="Agent-based market ecology laboratory")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_csv_env("TEZCAT_CORS_ORIGINS", ["*"]),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +184,7 @@ def api_create_from_preset(preset_id: str, body: PresetExperimentBody):
         config = build_config(preset_id, body.overrides)
     except ValidationError as exc:
         raise HTTPException(422, f"invalid overrides: {exc}") from exc
+    _ensure_public_config_limit(config)
     exp = Experiment.create(body.name or p["name"], config, preset_id=preset_id)
     store.save_experiment(exp.to_dict())
     log.info("experiment %s created from preset %s", exp.experiment_id, preset_id)
@@ -145,6 +200,7 @@ def api_create_experiment(body: CreateExperimentBody):
         config = ExperimentConfig.model_validate(body.config)
     except ValidationError as exc:
         raise HTTPException(422, f"invalid config: {exc}") from exc
+    _ensure_public_config_limit(config)
     exp = Experiment.create(body.name, config, hypothesis=body.hypothesis)
     store.save_experiment(exp.to_dict())
     return exp.to_dict()
@@ -180,6 +236,13 @@ def api_create_run(experiment_id: str, body: Optional[CreateRunBody] = None):
     else:
         seed = _random.SystemRandom().randrange(2**31)
     delay = body.step_delay_ms if body.step_delay_ms is not None else exp.config.step_delay_ms
+    max_active_runs = _public_limit("TEZCAT_PUBLIC_MAX_ACTIVE_RUNS", 1)
+    if max_active_runs is not None:
+        active_runs = sum(
+            lr.run.status in ("running", "paused") for lr in runner.live.values()
+        )
+        if active_runs >= max_active_runs:
+            raise HTTPException(429, "public demo is at its active run limit; try again later")
     run = Run.create(exp, seed=seed, step_delay_ms=delay)
     try:
         runner.start(run, exp)
@@ -267,6 +330,7 @@ def api_market(run_id: str):
 
 @app.get("/api/runs/{run_id}/history")
 def api_history(run_id: str, start: int = 0, limit: int = 5000):
+    limit = _bounded_query_limit(limit, "TEZCAT_PUBLIC_MAX_SERIES", 2_000)
     snaps = _run_data(run_id, "snapshots")
     chunk = snaps[start:start + limit]
     return {"snapshots": chunk, "next_start": start + len(chunk)}
@@ -274,12 +338,14 @@ def api_history(run_id: str, start: int = 0, limit: int = 5000):
 
 @app.get("/api/runs/{run_id}/trades")
 def api_trades(run_id: str, limit: int = 100):
+    limit = _bounded_query_limit(limit, "TEZCAT_PUBLIC_MAX_SERIES", 2_000)
     trades = _run_data(run_id, "trades")
     return {"trades": trades[-limit:]}
 
 
 @app.get("/api/runs/{run_id}/metrics")
 def api_metrics(run_id: str, start: int = 0, limit: int = 5000):
+    limit = _bounded_query_limit(limit, "TEZCAT_PUBLIC_MAX_SERIES", 2_000)
     metrics = _run_data(run_id, "metrics")
     chunk = metrics[start:start + limit]
     return {"metrics": chunk, "next_start": start + len(chunk)}
@@ -382,11 +448,14 @@ def api_research_register(body: ResearchSpecBody):
     from pydantic import ValidationError as _VE
     from tezcat.experiments.schema import DesignSpec, ExperimentVersion
     try:
+        config = ExperimentConfig.model_validate(body.config)
+        _ensure_public_config_limit(config)
         version = ExperimentVersion(
             body.experiment_id, body.name,
-            ExperimentConfig.model_validate(body.config),
+            config,
             DesignSpec.model_validate(body.design),
             root_seed=body.root_seed)
+        _ensure_public_design_limit(version.design.planned_runs())
     except (_VE, KeyError, ValueError) as exc:
         raise HTTPException(422, f"invalid experiment spec: {exc}") from exc
     if body.validate_only:
@@ -413,10 +482,21 @@ def api_research_batch(ref: str, body: Optional[BatchBody] = None):
     body = body or BatchBody()
     vid = _resolve_version(ref)
     version = research_registry.load(vid)
+    planned = version.design.planned_runs()
+    requested_runs = body.max_runs if body.max_runs is not None else planned
+    max_runs = _public_limit("TEZCAT_PUBLIC_MAX_RUNS", 60)
+    if max_runs is not None and requested_runs > max_runs:
+        raise HTTPException(
+            422,
+            f"public demo limit: batch max_runs must be <= {max_runs}",
+        )
     bid = batch_id_for(version)
     with _batch_lock:
         if bid in _active_batches:
             raise HTTPException(409, f"batch {bid} is already executing")
+        max_active_batches = _public_limit("TEZCAT_PUBLIC_MAX_ACTIVE_BATCHES", 1)
+        if max_active_batches is not None and len(_active_batches) >= max_active_batches:
+            raise HTTPException(429, "public demo is at its active batch limit; try again later")
         _active_batches.add(bid)
 
     def _execute():

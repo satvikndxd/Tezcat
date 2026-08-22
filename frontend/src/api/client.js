@@ -2,7 +2,10 @@
 // Every helper is defensive: network failures reject with ApiError, and the
 // connection status is broadcast so the status bar can show ONLINE / OFFLINE.
 
-const BASE = '/api';
+const configuredBase = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+const BASE = configuredBase
+  ? (configuredBase.endsWith('/api') ? configuredBase : `${configuredBase}/api`)
+  : '/api';
 
 export class ApiError extends Error {
   constructor(message, status) {
