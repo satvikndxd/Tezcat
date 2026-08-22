@@ -4,6 +4,7 @@ import Home from './pages/Home.jsx';
 import Experiment from './pages/Experiment.jsx';
 import Run from './pages/Run.jsx';
 import Report from './pages/Report.jsx';
+import Research from './pages/Research.jsx';
 
 // ---- tiny hash router ----------------------------------------------------
 
@@ -11,6 +12,9 @@ function parseRoute() {
   const hash = window.location.hash || '#/';
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts.length === 0) return { page: 'home' };
+  if (parts[0] === 'research') {
+    return { page: 'research', id: parts[1] ? decodeURIComponent(parts[1]) : null };
+  }
   if (parts[0] === 'experiment' && parts[1]) {
     return { page: 'experiment', id: decodeURIComponent(parts[1]) };
   }
@@ -61,6 +65,7 @@ function StatusBar() {
     <header className="statusbar">
       <div className="brand">
         <a href="#/">TEZCAT — MARKET ECOLOGY LAB</a>
+        <a className="navlink" href="#/research">RESEARCH</a>
       </div>
       <div className="right">
         <Clock />
@@ -84,6 +89,9 @@ export default function App() {
       break;
     case 'report':
       page = <Report id={route.id} key={route.id} />;
+      break;
+    case 'research':
+      page = <Research id={route.id} key={route.id || 'list'} />;
       break;
     default:
       page = <Home />;

@@ -335,6 +335,164 @@ def api_health():
 
 
 # ---------------------------------------------------------------------------
+# Research API (Phase F10): register → batch → analyze → report → reproduce
+# ---------------------------------------------------------------------------
+import threading as _threading  # noqa: E402
+
+from tezcat.experiments.registry import Registry, RegistryError  # noqa: E402
+
+research_registry = Registry(os.environ.get("TEZCAT_DATA_DIR", "data"))
+_active_batches: set = set()
+_batch_lock = _threading.Lock()
+
+
+class ResearchSpecBody(BaseModel):
+    experiment_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    root_seed: Optional[int] = None
+    config: Dict[str, Any]
+    design: Dict[str, Any]
+    validate_only: bool = False
+
+
+class BatchBody(BaseModel):
+    max_runs: Optional[int] = Field(None, ge=1)
+
+
+class AnalyzeBody(BaseModel):
+    seed: int = 0
+    allow_partial: bool = False
+
+
+class ReproduceBody(BaseModel):
+    sample: Optional[int] = Field(3, ge=1)
+    full: bool = False
+
+
+def _resolve_version(ref: str) -> str:
+    from tezcat.experiments.reproduce import ReproductionError, resolve_reference
+    try:
+        return resolve_reference(research_registry, ref)
+    except ReproductionError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/research/experiments", status_code=201)
+def api_research_register(body: ResearchSpecBody):
+    from pydantic import ValidationError as _VE
+    from tezcat.experiments.schema import DesignSpec, ExperimentVersion
+    try:
+        version = ExperimentVersion(
+            body.experiment_id, body.name,
+            ExperimentConfig.model_validate(body.config),
+            DesignSpec.model_validate(body.design),
+            root_seed=body.root_seed)
+    except (_VE, KeyError, ValueError) as exc:
+        raise HTTPException(422, f"invalid experiment spec: {exc}") from exc
+    if body.validate_only:
+        return {"validated": True, "version_id": version.version_id,
+                "research_hash": version.research_hash,
+                "planned_runs": version.design.planned_runs()}
+    vid = research_registry.register(version)
+    return research_registry.get(vid)
+
+
+@app.get("/api/research/experiments")
+def api_research_list():
+    return research_registry.list()
+
+
+@app.get("/api/research/experiments/{ref}")
+def api_research_get(ref: str):
+    return research_registry.get(_resolve_version(ref))
+
+
+@app.post("/api/research/experiments/{ref}/batch", status_code=202)
+def api_research_batch(ref: str, body: Optional[BatchBody] = None):
+    from tezcat.experiments.batch import BatchRunner, batch_id_for
+    body = body or BatchBody()
+    vid = _resolve_version(ref)
+    version = research_registry.load(vid)
+    bid = batch_id_for(version)
+    with _batch_lock:
+        if bid in _active_batches:
+            raise HTTPException(409, f"batch {bid} is already executing")
+        _active_batches.add(bid)
+
+    def _execute():
+        try:
+            BatchRunner(research_registry).run(vid, max_runs=body.max_runs)
+        finally:
+            with _batch_lock:
+                _active_batches.discard(bid)
+
+    _threading.Thread(target=_execute, daemon=True,
+                      name=f"batch-{bid}").start()
+    return {"batch_id": bid, "version_id": vid, "status": "started",
+            "planned": version.design.planned_runs()}
+
+
+@app.get("/api/research/batches/{batch_id}")
+def api_research_batch_status(batch_id: str):
+    batch = research_registry.get_batch(batch_id)
+    if batch is None:
+        completed = len(research_registry.list_result_rows(batch_id))
+        with _batch_lock:
+            running = batch_id in _active_batches
+        if not completed and not running:
+            raise HTTPException(404, "batch not found")
+        return {"batch_id": batch_id, "status": "running" if running else "unknown",
+                "completed": completed}
+    with _batch_lock:
+        batch["executing_now"] = batch["batch_id"] in _active_batches
+    return batch
+
+
+@app.post("/api/research/experiments/{ref}/analyze")
+def api_research_analyze(ref: str, body: Optional[AnalyzeBody] = None):
+    from tezcat.analysis import AnalysisError, analyze
+    body = body or AnalyzeBody()
+    vid = _resolve_version(ref)
+    try:
+        return analyze(research_registry, vid, seed=body.seed,
+                       allow_partial=body.allow_partial)
+    except AnalysisError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/research/experiments/{ref}/analysis")
+def api_research_analysis(ref: str):
+    a = research_registry.get_analysis(_resolve_version(ref))
+    if a is None:
+        raise HTTPException(404, "no analysis yet; POST …/analyze first")
+    return a
+
+
+@app.get("/api/research/experiments/{ref}/summary")
+def api_research_summary(ref: str):
+    from tezcat.experiments.aggregation import aggregate
+    return aggregate(research_registry, _resolve_version(ref))
+
+
+@app.get("/api/research/experiments/{ref}/report")
+def api_research_report(ref: str):
+    from tezcat.analysis import build_report
+    vid = _resolve_version(ref)
+    try:
+        return {"version_id": vid, "markdown": build_report(research_registry, vid)}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/research/experiments/{ref}/reproduce")
+def api_research_reproduce(ref: str, body: Optional[ReproduceBody] = None):
+    from tezcat.experiments.reproduce import reproduce
+    body = body or ReproduceBody()
+    return reproduce(research_registry, _resolve_version(ref),
+                     sample=None if body.full else body.sample)
+
+
+# ---------------------------------------------------------------------------
 # Static dashboard (built React app) — mounted last so /api wins.
 # ---------------------------------------------------------------------------
 _dist = Path(os.environ.get("TEZCAT_FRONTEND_DIST",
