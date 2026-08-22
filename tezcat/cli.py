@@ -100,7 +100,8 @@ def cmd_run(args) -> int:
         return 0
 
     print("running batch (resumable; re-run this command to continue)…")
-    batch = BatchRunner(registry).run(vid, max_runs=args.max_runs)
+    batch = BatchRunner(registry).run(vid, max_runs=args.max_runs,
+                                  workers=args.workers)
     mark = OK if batch["status"] == "completed" else "…"
     print(f"{mark} batch {batch['status']}: "
           f"{batch['completed']}/{batch['planned']} runs "
@@ -161,7 +162,9 @@ def cmd_report(args) -> int:
         print(f"{BAD} {exc}", file=sys.stderr)
         return 1
     if args.output:
-        Path(args.output).write_text(markdown)
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(markdown)
         print(f"{OK} report written to {args.output}")
     else:
         print(markdown)
@@ -221,6 +224,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("spec", help="path to a JSON experiment spec")
     run.add_argument("--max-runs", type=int, default=None,
                      help="budget cap for this call (resumable)")
+    run.add_argument("--workers", type=int, default=1,
+                     help="worker processes for independent replications "
+                          "(results identical for any worker count)")
     run.add_argument("--validate-only", action="store_true",
                      help="validate and register without executing")
     run.set_defaults(func=cmd_run)

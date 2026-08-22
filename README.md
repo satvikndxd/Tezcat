@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-192_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-208_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -53,6 +53,7 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 | **Risk Engine & Stress Lab** | [Margin buying, event-driven liquidation *process*, VaR/Expected Shortfall, pump-and-dump stress scenarios](docs/risk.md) — endogenous margin spirals, opt-in per experiment |
 | **Stylized Facts & Calibration** | [Cont-style feature extraction, real-vs-synthetic ensemble comparison, budgeted grid calibration with *enforced* out-of-sample validation](docs/calibration.md) — file-based data lineage, fully offline |
 | **Research CLI & API** | [`tezcat run / analyze / report / reproduce / list`](docs/cli.md) + the same loop under `/api/research` and a dashboard **RESEARCH** section — the complete loop with zero knowledge of internals |
+| **Parallel & Hardened** | [`--workers N` process-pool replications (byte-identical for any worker count), fault-injection-tested storage, differential reference matcher, environment-aware benchmarks](docs/benchmarks.md) |
 | **REST API + Dashboard** | FastAPI control plane; minimalist Bloomberg-style black terminal UI (React + custom SVG charts) |
 | **Cloud (optional)** | S3-layout artifact store, DynamoDB adapters, SAM template; everything runs fully local without AWS |
 
@@ -237,7 +238,7 @@ tezcat/
 frontend/                # React dashboard (Vite, custom SVG charts)
 examples/                # ready-to-run experiment specs (margin spiral AB)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 192 tests: unit / property / determinism / replay / integration
+tests/                   # 208 tests: unit / property / determinism / replay / differential / fault
 ```
 
 ## Cloud deployment (AWS)
@@ -270,9 +271,9 @@ Tezcat is being hardened from an MVP artificial-market laboratory into a researc
 | F8 | Leverage, margin, liquidation, Stress Lab | ✅ | [docs/risk.md](docs/risk.md) |
 | F9 | Stylized facts, data providers, calibration discipline | ✅ | [docs/calibration.md](docs/calibration.md) |
 | F10 | Research CLI, research API, dashboard research section | ✅ | [docs/cli.md](docs/cli.md) |
-| F11 | Benchmarks, fault injection, distributed replications | ⬜ planned | — |
+| F11 | Parallel workers, fault injection, differential matcher, benchmarks | ✅ | [docs/benchmarks.md](docs/benchmarks.md) |
 
-Not yet implemented (target roadmap, not current facts): licensed real-market data ingestion (the file provider and calibration discipline exist; no real dataset or network adapter ships), distributed execution, latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
+Not yet implemented (target roadmap, not current facts): licensed real-market data ingestion (the file provider and calibration discipline exist; no real dataset or network adapter ships), multi-machine distributed execution (single-machine parallel workers exist), latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
 
 ## Documentation index
 
@@ -287,5 +288,6 @@ Not yet implemented (target roadmap, not current facts): licensed real-market da
 | [docs/risk.md](docs/risk.md) | Margin model, liquidation process, tail metrics, Stress Lab, acceptance evidence |
 | [docs/calibration.md](docs/calibration.md) | Data lineage, stylized-facts features, ensemble comparison, calibration discipline, identifiability findings |
 | [docs/cli.md](docs/cli.md) | The researcher guide: five commands, spec format, research API, worked example |
+| [docs/benchmarks.md](docs/benchmarks.md) | Benchmark protocol, parallel-worker correctness, fault-injection findings, differential matcher |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
 | [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) | The frozen pre-hardening baseline and audit trail |
