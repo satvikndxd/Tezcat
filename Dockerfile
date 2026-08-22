@@ -16,4 +16,4 @@ COPY --from=frontend-build /app/frontend/dist frontend/dist
 ENV TEZCAT_STORE=local TEZCAT_DATA_DIR=/data
 VOLUME /data
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn tezcat.api.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "python3 scripts/seed_public_demo.py && exec uvicorn tezcat.api.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
