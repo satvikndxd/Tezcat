@@ -93,6 +93,28 @@ export default function Home() {
     <div>
       {error && <div className="err" style={{ marginBottom: 10 }}>{error}</div>}
 
+      <div className="hero-split">
+        <div className="hero-card primary">
+          <div className="label">CUSTOM EXPERIMENT</div>
+          <div className="hero-title">Build your own market.</div>
+          <div className="desc">
+            Design an agent population, shock schedule, and risk configuration,
+            then run it as an immutable, reproducible experiment — the same
+            machinery behind every preset.
+          </div>
+          <button className="btn" onClick={() => navigate('#/build')}>
+            BUILD SCENARIO
+          </button>
+        </div>
+        <div className="hero-card">
+          <div className="label">PRESETS</div>
+          <div className="desc">
+            Quickly explore known market phenomena. Presets are templates —
+            each can be loaded into the builder and modified.
+          </div>
+        </div>
+      </div>
+
       <div className="label" style={{ marginBottom: 8 }}>PRESET SCENARIOS</div>
       {presets.length === 0 ? (
         <div className="panel"><div className="msg">NO PRESETS AVAILABLE</div></div>

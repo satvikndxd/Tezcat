@@ -49,3 +49,18 @@ Local: RunManager threads. AWS: API Gateway → control Lambda (Mangum-wrapped
 FastAPI) writes run metadata to DynamoDB and emits `RunChunkRequested`;
 worker Lambda replays deterministically up to a chunk boundary, checkpoints,
 re-emits until done, then writes artifacts to S3. See `infra/templates/template.yaml`.
+
+
+## Phase S2 additions (custom scenarios + TradeOps)
+
+Two layers were added *around* the frozen research kernel, never through it:
+
+- **Scenarios** (`tezcat/experiments/scenarios.py`): mutable drafts and
+  templates that compile into the canonical experiment spec; validation,
+  identity preview, and registration reuse `ExperimentVersion` verbatim —
+  there is no second execution or hashing path.
+- **TradeOps** (`tezcat/ops/`): an in-process queue + worker threads that
+  execute batches through the existing `BatchRunner` in budgeted chunks,
+  adding job states, explicit failures, identity-preserving retries, a
+  duplicate-execution guard, and env-configurable capacity guardrails at
+  the submission boundary. See docs/scenarios.md and docs/docker.md.

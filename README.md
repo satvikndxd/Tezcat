@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-208_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-231_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -54,6 +54,8 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 | **Stylized Facts & Calibration** | [Cont-style feature extraction, real-vs-synthetic ensemble comparison, budgeted grid calibration with *enforced* out-of-sample validation](docs/calibration.md) — file-based data lineage, fully offline |
 | **Research CLI & API** | [`tezcat run / analyze / report / reproduce / list`](docs/cli.md) + the same loop under `/api/research` and a dashboard **RESEARCH** section — the complete loop with zero knowledge of internals |
 | **Parallel & Hardened** | [`--workers N` process-pool replications (byte-identical for any worker count), fault-injection-tested storage, differential reference matcher, environment-aware benchmarks](docs/benchmarks.md) |
+| **Scenario Builder** | [Design your own market in the dashboard](docs/scenarios.md): agents, behavior, risk, shock timeline — compiled into the canonical experiment schema with the research identity previewed before you run; templates, drafts, import/export |
+| **TradeOps** | [Operational layer around execution](docs/scenarios.md): queue, workers, explicit failures, identity-preserving retries, duplicate-execution guard, env-configurable capacity guardrails |
 | **REST API + Dashboard** | FastAPI control plane; minimalist Bloomberg-style black terminal UI (React + custom SVG charts) |
 | **Cloud (optional)** | S3-layout artifact store, DynamoDB adapters, SAM template; everything runs fully local without AWS |
 
@@ -123,6 +125,14 @@ print(build_report(registry, vid))         # markdown rendered from artifacts on
 ```
 
 The design is validated *before* anything runs (missing control, too few replications, budget overruns, and typo'd parameter paths are all rejected). The batch is content-addressed — re-running resumes; nothing is recomputed or silently dropped.
+
+## Build your own market
+
+The dashboard's **BUILD** section is the primary research interface: design
+an agent population, behavior, risk configuration, and shock timeline, see
+the exact research identity your spec would mint, then queue it through
+**TRADEOPS** and follow the analyze → report → reproduce loop. Presets are
+templates — each loads into the builder.
 
 ## The three presets
 
@@ -238,7 +248,7 @@ tezcat/
 frontend/                # React dashboard (Vite, custom SVG charts)
 examples/                # ready-to-run experiment specs (margin spiral AB)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 208 tests: unit / property / determinism / replay / differential / fault
+tests/                   # 231 tests: unit / property / determinism / replay / differential / fault
 ```
 
 ## Public deployment
@@ -276,6 +286,7 @@ Tezcat is being hardened from an MVP artificial-market laboratory into a researc
 | F9 | Stylized facts, data providers, calibration discipline | ✅ | [docs/calibration.md](docs/calibration.md) |
 | F10 | Research CLI, research API, dashboard research section | ✅ | [docs/cli.md](docs/cli.md) |
 | F11 | Parallel workers, fault injection, differential matcher, benchmarks | ✅ | [docs/benchmarks.md](docs/benchmarks.md) |
+| S2 | Custom Scenario Builder, TradeOps, Docker/Daytona prep | ✅ | [docs/scenarios.md](docs/scenarios.md) · [docs/docker.md](docs/docker.md) |
 
 Not yet implemented (target roadmap, not current facts): licensed real-market data ingestion (the file provider and calibration discipline exist; no real dataset or network adapter ships), multi-machine distributed execution (single-machine parallel workers exist), latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
 
@@ -293,6 +304,8 @@ Not yet implemented (target roadmap, not current facts): licensed real-market da
 | [docs/calibration.md](docs/calibration.md) | Data lineage, stylized-facts features, ensemble comparison, calibration discipline, identifiability findings |
 | [docs/cli.md](docs/cli.md) | The researcher guide: five commands, spec format, research API, worked example |
 | [docs/benchmarks.md](docs/benchmarks.md) | Benchmark protocol, parallel-worker correctness, fault-injection findings, differential matcher |
+| [docs/scenarios.md](docs/scenarios.md) | Custom scenarios, scenario/experiment/run semantics, TradeOps queue and guardrails |
+| [docs/docker.md](docs/docker.md) | Container launch, complete env-var list, public-demo limits, Daytona readiness |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
 | [docs/public-demo.md](docs/public-demo.md) | GitHub Pages + Render public demo deployment, limits, persistence, CI/CD, validation |
 | [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) | The frozen pre-hardening baseline and audit trail |

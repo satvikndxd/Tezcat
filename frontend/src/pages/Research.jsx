@@ -146,7 +146,15 @@ function ResearchDetail({ id }) {
     }
   };
 
-  const runBatch = () => act('batch', () => api.researchBatch(id));
+  const runBatch = () => act('batch', async () => {
+    try {
+      await api.opsSubmit(id);          // TradeOps queue: guardrails + duplicate guard
+    } catch (e) {
+      // Duplicate execution is informative, not an error worth aborting on.
+      const msg = typeof e.message === 'object' ? e.message : null;
+      if (!(msg && msg.code === 'duplicate_execution')) throw e;
+    }
+  });
   const runAnalyze = () =>
     act('analyze', async () => setAnalysis(await api.researchAnalyze(id)));
   const loadReport = () =>

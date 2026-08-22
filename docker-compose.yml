@@ -1,0 +1,21 @@
+# Tezcat: one service, one mounted data directory. TradeOps workers run
+# inside the API process; standalone workers are just the CLI
+# (`docker compose exec tezcat tezcat run <spec> --workers N`).
+services:
+  tezcat:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      TEZCAT_STORE: local
+      TEZCAT_DATA_DIR: /data
+      # TradeOps public-demo guardrails (operator policy; see docs/docker.md)
+      TEZCAT_OPS_WORKERS: "2"
+      TEZCAT_OPS_CHUNK: "5"
+      TEZCAT_MAX_QUEUE: "20"
+      TEZCAT_MAX_ACTIVE: "4"
+      TEZCAT_MAX_REPLICATIONS: "100"
+      TEZCAT_MAX_STEPS: "3000"
+      TEZCAT_MAX_PLANNED_RUNS: "200"
