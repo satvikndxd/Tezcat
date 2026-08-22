@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_BASE_PATH: /Tezcat/
-      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://tezcat-public-api.onrender.com' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
