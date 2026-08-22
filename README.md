@@ -14,7 +14,7 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 
 ---
 
-**Contents** · [Demo](#see-it-in-action) · [What's inside](#whats-inside) · [Quickstart](#quickstart) · [Run an experiment](#run-a-real-experiment-in-30-lines) · [Presets](#the-three-presets) · [API](#api) · [Architecture](#architecture) · [Design rules](#critical-design-rules) · [Roadmap status](#implementation-status-vs-research-roadmap) · [Docs](#documentation-index)
+**Contents** · [Demo](#see-it-in-action) · [What's inside](#whats-inside) · [Quickstart](#quickstart) · [Run an experiment](#run-a-real-experiment-in-30-lines) · [Presets](#the-three-presets) · [API](#api) · [Architecture](#architecture) · [Public deployment](#public-deployment) · [Design rules](#critical-design-rules) · [Roadmap status](#implementation-status-vs-research-roadmap) · [Docs](#documentation-index)
 
 ---
 
@@ -241,6 +241,10 @@ infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
 tests/                   # 208 tests: unit / property / determinism / replay / differential / fault
 ```
 
+## Public deployment
+
+The live free public demo is available at [satvikndxd.github.io/Tezcat](https://satvikndxd.github.io/Tezcat/), with the research workflow at [#/research](https://satvikndxd.github.io/Tezcat/#/research). Its separate FastAPI backend is [tezcat-public-api.onrender.com](https://tezcat-public-api.onrender.com). The deployment architecture, environment variables, free-tier limitations, persistence behavior, redeploy procedure, shutdown steps, and validation record are documented in [`docs/public-demo.md`](docs/public-demo.md).
+
 ## Cloud deployment (AWS)
 
 Local-first: everything runs without AWS. To deploy, see [`docs/deployment.md`](docs/deployment.md) — `infra/templates/template.yaml` provisions API Gateway + control Lambda, a chunked worker Lambda triggered by EventBridge, DynamoDB tables, a private S3 artifact bucket, and CloudWatch alarms. Set `TEZCAT_STORE=aws` to switch persistence.
@@ -290,4 +294,5 @@ Not yet implemented (target roadmap, not current facts): licensed real-market da
 | [docs/cli.md](docs/cli.md) | The researcher guide: five commands, spec format, research API, worked example |
 | [docs/benchmarks.md](docs/benchmarks.md) | Benchmark protocol, parallel-worker correctness, fault-injection findings, differential matcher |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
+| [docs/public-demo.md](docs/public-demo.md) | GitHub Pages + Render public demo deployment, limits, persistence, CI/CD, validation |
 | [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) | The frozen pre-hardening baseline and audit trail |
