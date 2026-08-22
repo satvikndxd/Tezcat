@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-168_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-181_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -51,6 +51,7 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 | **Reports** | Markdown reports rendered **exclusively from persisted artifacts** — a test proves rendered numbers equal independently recomputed values |
 | **Microstructure & TCA** | [Microprice, queue imbalance, effective/realized spread, price impact, fill probability, implementation shortfall](docs/microstructure.md) — all with lineage to source events |
 | **Risk Engine & Stress Lab** | [Margin buying, event-driven liquidation *process*, VaR/Expected Shortfall, pump-and-dump stress scenarios](docs/risk.md) — endogenous margin spirals, opt-in per experiment |
+| **Stylized Facts & Calibration** | [Cont-style feature extraction, real-vs-synthetic ensemble comparison, budgeted grid calibration with *enforced* out-of-sample validation](docs/calibration.md) — file-based data lineage, fully offline |
 | **REST API + Dashboard** | FastAPI control plane; minimalist Bloomberg-style black terminal UI (React + custom SVG charts) |
 | **Cloud (optional)** | S3-layout artifact store, DynamoDB adapters, SAM template; everything runs fully local without AWS |
 
@@ -65,7 +66,7 @@ cd frontend && npm install && npm run build && cd ..
 
 ```bash
 .venv/bin/python scripts/smoke.py      # headless run of all three presets + determinism gate
-.venv/bin/python -m pytest tests -q    # 168 tests: unit, property, determinism, replay, integration
+.venv/bin/python -m pytest tests -q    # 181 tests: unit, property, determinism, replay, integration
 ```
 
 ## Run a real experiment in 30 lines
@@ -213,11 +214,12 @@ tezcat/
 ├── analysis/            # bootstrap/permutation stats, design-aware inference, reports
 ├── microstructure/      # microprice, spreads, impact, queue, fills, TCA
 ├── risk/                # margin engine, liquidation process, VaR/ES, stress scenarios
+├── data/  calibration/  # file-based series providers; budgeted out-of-sample calibration
 ├── persistence/         # local JSON store + AWS (DynamoDB/S3) store
 └── api/                 # FastAPI app, run manager, Lambda handlers
 frontend/                # React dashboard (Vite, custom SVG charts)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 168 tests: unit / property / determinism / replay / integration
+tests/                   # 181 tests: unit / property / determinism / replay / integration
 ```
 
 ## Cloud deployment (AWS)
@@ -248,11 +250,11 @@ Tezcat is being hardened from an MVP artificial-market laboratory into a researc
 | F6 | Statistical inference + artifact-only reports | ✅ | [docs/analysis.md](docs/analysis.md) |
 | F7 | Microstructure & TCA with event lineage | ✅ | [docs/microstructure.md](docs/microstructure.md) |
 | F8 | Leverage, margin, liquidation, Stress Lab | ✅ | [docs/risk.md](docs/risk.md) |
-| F9 | Stylized facts, data adapters, calibration | ⬜ planned | — |
+| F9 | Stylized facts, data providers, calibration discipline | ✅ | [docs/calibration.md](docs/calibration.md) |
 | F10 | Research console, CLI, result registry UI | ⬜ planned | — |
 | F11 | Benchmarks, fault injection, distributed replications | ⬜ planned | — |
 
-Not yet implemented (target roadmap, not current facts): calibration against real data, distributed execution, latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
+Not yet implemented (target roadmap, not current facts): licensed real-market data ingestion (the file provider and calibration discipline exist; no real dataset or network adapter ships), distributed execution, latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
 
 ## Documentation index
 
@@ -265,5 +267,6 @@ Not yet implemented (target roadmap, not current facts): calibration against rea
 | [docs/analysis.md](docs/analysis.md) | Statistical methods, assumptions, policies, honest-null acceptance evidence |
 | [docs/microstructure.md](docs/microstructure.md) | Metric definitions, units, edge cases, TCA decomposition, QI association caveats |
 | [docs/risk.md](docs/risk.md) | Margin model, liquidation process, tail metrics, Stress Lab, acceptance evidence |
+| [docs/calibration.md](docs/calibration.md) | Data lineage, stylized-facts features, ensemble comparison, calibration discipline, identifiability findings |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
 | [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) | The frozen pre-hardening baseline and audit trail |
