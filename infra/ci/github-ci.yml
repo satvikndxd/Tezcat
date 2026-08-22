@@ -34,6 +34,8 @@ jobs:
         run: pytest tests -q
       - name: Smoke run (seed-42 determinism gate)
         run: python scripts/smoke.py
+      - name: Benchmark harness smoke (structure only; no timing assertions)
+        run: python benchmarks/bench.py --quick
 
   frontend:
     name: Frontend build

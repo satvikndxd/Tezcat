@@ -126,35 +126,46 @@ def test_incremental_history_polling(client):
     assert second["snapshots"][0]["step"] == 101
 
 
+def _poll(fn, timeout=30, interval=0.1):
+    """Poll until fn() is truthy; return its value. Deadline-based, not
+    sleep-based — fixed sleeps made this file flaky under load (F11)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        value = fn()
+        if value:
+            return value
+        time.sleep(interval)
+    raise TimeoutError("condition not met in time")
+
+
 def test_shock_injection_and_pause(client):
     resp = client.post("/api/presets/stable_baseline/experiments", json={
         "overrides": {"total_steps": 3000, "step_delay_ms": 5}})
     exp = resp.json()
     run = client.post(f"/api/experiments/{exp['experiment_id']}/runs", json={}).json()
     rid = run["run_id"]
-    time.sleep(1.0)
+    # Wait until the run is actually advancing.
+    _poll(lambda: client.get(f"/api/runs/{rid}").json()["steps_completed"] > 10)
 
     r = client.post(f"/api/runs/{rid}/shocks", json={
         "shock_type": "whale_order", "side": "sell", "magnitude": 500, "duration": 10})
     assert r.status_code == 202
-    time.sleep(1.0)
-    shocks = client.get(f"/api/runs/{rid}/shocks").json()
-    assert any(s["trigger_reason"] == "manual" for s in shocks)
+    shocks = _poll(lambda: [s for s in client.get(f"/api/runs/{rid}/shocks").json()
+                            if s["trigger_reason"] == "manual"])
+    assert shocks
 
     assert client.post(f"/api/runs/{rid}/pause").json()["status"] == "paused"
-    steps_a = client.get(f"/api/runs/{rid}").json()["steps_completed"]
-    time.sleep(0.6)
-    steps_b = client.get(f"/api/runs/{rid}").json()["steps_completed"]
-    assert steps_a == steps_b
+
+    def settled():
+        a = client.get(f"/api/runs/{rid}").json()["steps_completed"]
+        time.sleep(0.3)
+        b = client.get(f"/api/runs/{rid}").json()["steps_completed"]
+        return a == b  # one in-flight step may complete right after pause
+    _poll(settled, timeout=10, interval=0.2)
+
     assert client.post(f"/api/runs/{rid}/resume").json()["status"] == "running"
-    cancelled = client.post(f"/api/runs/{rid}/cancel")
-    assert cancelled.status_code == 200
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if client.get(f"/api/runs/{rid}").json()["status"] == "cancelled":
-            break
-        time.sleep(0.1)
-    assert client.get(f"/api/runs/{rid}").json()["status"] == "cancelled"
+    assert client.post(f"/api/runs/{rid}/cancel").status_code == 200
+    _poll(lambda: client.get(f"/api/runs/{rid}").json()["status"] == "cancelled")
 
 
 def test_bad_input_validation(client):

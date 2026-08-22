@@ -39,8 +39,17 @@ class Registry:
 
     # -- io ------------------------------------------------------------
     def _write(self, path: Path, obj: Any) -> None:
+        """Atomic write via a *writer-unique* tmp name + rename.
+
+        A shared tmp name (e.g. ``key.tmp``) races when two writers target
+        the same key concurrently — one rename wins and the other's tmp
+        vanishes (found by the F11 fault-injection tests). Unique tmp names
+        make concurrent same-key writes safe across threads and processes;
+        content-identical rows mean last-write-wins is benign.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
+        tmp = path.with_name(
+            f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         with open(tmp, "w") as f:
             json.dump(obj, f, indent=1)
         os.replace(tmp, path)
@@ -136,7 +145,8 @@ class Registry:
         return self._read(self.root / "batches" / f"{batch_id}.json")
 
     def save_result_row(self, batch_id: str, key: str, row: Dict[str, Any]) -> None:
-        self._write(self.root / "results" / batch_id / f"{key}.json", row)
+        with self._lock:
+            self._write(self.root / "results" / batch_id / f"{key}.json", row)
 
     def load_result_row(self, batch_id: str, key: str) -> Optional[Dict[str, Any]]:
         return self._read(self.root / "results" / batch_id / f"{key}.json")

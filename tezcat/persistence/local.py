@@ -23,8 +23,12 @@ class LocalStore:
 
     # -- generic -------------------------------------------------------
     def _write(self, path: Path, obj: Any) -> None:
+        # Writer-unique tmp name: concurrent same-key writes (e.g. the run
+        # manager's periodic persistence racing an API save) must not share
+        # a tmp file — see the F11 fault-injection tests.
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
+        tmp = path.with_name(
+            f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         with open(tmp, "w") as f:
             json.dump(obj, f, indent=1, default=str)
         os.replace(tmp, path)
