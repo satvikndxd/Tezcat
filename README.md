@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-181_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-192_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -52,6 +52,7 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 | **Microstructure & TCA** | [Microprice, queue imbalance, effective/realized spread, price impact, fill probability, implementation shortfall](docs/microstructure.md) — all with lineage to source events |
 | **Risk Engine & Stress Lab** | [Margin buying, event-driven liquidation *process*, VaR/Expected Shortfall, pump-and-dump stress scenarios](docs/risk.md) — endogenous margin spirals, opt-in per experiment |
 | **Stylized Facts & Calibration** | [Cont-style feature extraction, real-vs-synthetic ensemble comparison, budgeted grid calibration with *enforced* out-of-sample validation](docs/calibration.md) — file-based data lineage, fully offline |
+| **Research CLI & API** | [`tezcat run / analyze / report / reproduce / list`](docs/cli.md) + the same loop under `/api/research` and a dashboard **RESEARCH** section — the complete loop with zero knowledge of internals |
 | **REST API + Dashboard** | FastAPI control plane; minimalist Bloomberg-style black terminal UI (React + custom SVG charts) |
 | **Cloud (optional)** | S3-layout artifact store, DynamoDB adapters, SAM template; everything runs fully local without AWS |
 
@@ -66,8 +67,23 @@ cd frontend && npm install && npm run build && cd ..
 
 ```bash
 .venv/bin/python scripts/smoke.py      # headless run of all three presets + determinism gate
-.venv/bin/python -m pytest tests -q    # 181 tests: unit, property, determinism, replay, integration
+.venv/bin/python -m pytest tests -q    # tests: unit, property, determinism, replay, integration
 ```
+
+### The five-command research loop
+
+```bash
+tezcat run examples/margin_spiral_ab.json   # register + execute 40 runs (~30s)
+tezcat analyze expv_417305c181af            # bootstrap CIs, permutation p, effect sizes
+tezcat report  expv_417305c181af -o report.md
+tezcat reproduce 417305c1                   # re-execute + verify every stored hash
+tezcat list
+```
+
+`reproduce` takes the research hash you'd cite in a paper (any unambiguous
+prefix) and verifies state hashes, event hashes, event-log chains, and
+metrics byte-for-byte against the stored artifacts — a single falsified
+number makes it fail. Full guide: [docs/cli.md](docs/cli.md).
 
 ## Run a real experiment in 30 lines
 
@@ -216,10 +232,12 @@ tezcat/
 ├── risk/                # margin engine, liquidation process, VaR/ES, stress scenarios
 ├── data/  calibration/  # file-based series providers; budgeted out-of-sample calibration
 ├── persistence/         # local JSON store + AWS (DynamoDB/S3) store
-└── api/                 # FastAPI app, run manager, Lambda handlers
+├── cli.py               # tezcat run / analyze / report / reproduce / list
+└── api/                 # FastAPI app, run manager, Lambda handlers, research API
 frontend/                # React dashboard (Vite, custom SVG charts)
+examples/                # ready-to-run experiment specs (margin spiral AB)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 181 tests: unit / property / determinism / replay / integration
+tests/                   # 192 tests: unit / property / determinism / replay / integration
 ```
 
 ## Cloud deployment (AWS)
@@ -251,7 +269,7 @@ Tezcat is being hardened from an MVP artificial-market laboratory into a researc
 | F7 | Microstructure & TCA with event lineage | ✅ | [docs/microstructure.md](docs/microstructure.md) |
 | F8 | Leverage, margin, liquidation, Stress Lab | ✅ | [docs/risk.md](docs/risk.md) |
 | F9 | Stylized facts, data providers, calibration discipline | ✅ | [docs/calibration.md](docs/calibration.md) |
-| F10 | Research console, CLI, result registry UI | ⬜ planned | — |
+| F10 | Research CLI, research API, dashboard research section | ✅ | [docs/cli.md](docs/cli.md) |
 | F11 | Benchmarks, fault injection, distributed replications | ⬜ planned | — |
 
 Not yet implemented (target roadmap, not current facts): licensed real-market data ingestion (the file provider and calibration discipline exist; no real dataset or network adapter ships), distributed execution, latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
@@ -268,5 +286,6 @@ Not yet implemented (target roadmap, not current facts): licensed real-market da
 | [docs/microstructure.md](docs/microstructure.md) | Metric definitions, units, edge cases, TCA decomposition, QI association caveats |
 | [docs/risk.md](docs/risk.md) | Margin model, liquidation process, tail metrics, Stress Lab, acceptance evidence |
 | [docs/calibration.md](docs/calibration.md) | Data lineage, stylized-facts features, ensemble comparison, calibration discipline, identifiability findings |
+| [docs/cli.md](docs/cli.md) | The researcher guide: five commands, spec format, research API, worked example |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
 | [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) | The frozen pre-hardening baseline and audit trail |

@@ -110,6 +110,20 @@ export const api = {
     apiGet(`/runs/${encodeURIComponent(id)}/metrics?start=${start}&limit=${limit}`),
   report: (id) => apiGet(`/runs/${encodeURIComponent(id)}/report`),
   exportRun: (id) => apiPost(`/runs/${encodeURIComponent(id)}/export`),
+
+  // Research API (Phase F10): register -> batch -> analyze -> report -> reproduce
+  researchList: () => apiGet('/research/experiments'),
+  researchGet: (ref) => apiGet(`/research/experiments/${encodeURIComponent(ref)}`),
+  researchBatch: (ref, body) =>
+    apiPost(`/research/experiments/${encodeURIComponent(ref)}/batch`, body || {}),
+  researchBatchStatus: (batchId) => apiGet(`/research/batches/${encodeURIComponent(batchId)}`),
+  researchSummary: (ref) => apiGet(`/research/experiments/${encodeURIComponent(ref)}/summary`),
+  researchAnalyze: (ref, body) =>
+    apiPost(`/research/experiments/${encodeURIComponent(ref)}/analyze`, body || {}),
+  researchAnalysis: (ref) => apiGet(`/research/experiments/${encodeURIComponent(ref)}/analysis`),
+  researchReport: (ref) => apiGet(`/research/experiments/${encodeURIComponent(ref)}/report`),
+  researchReproduce: (ref, body) =>
+    apiPost(`/research/experiments/${encodeURIComponent(ref)}/reproduce`, body || {}),
 };
 
 // ---- small formatting helpers shared by pages ----------------------------
