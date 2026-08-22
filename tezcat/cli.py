@@ -161,7 +161,9 @@ def cmd_report(args) -> int:
         print(f"{BAD} {exc}", file=sys.stderr)
         return 1
     if args.output:
-        Path(args.output).write_text(markdown)
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(markdown)
         print(f"{OK} report written to {args.output}")
     else:
         print(markdown)
