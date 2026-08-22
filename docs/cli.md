@@ -131,10 +131,26 @@ loose_margin_10x   n=20  max_drawdown mean=0.1847  q95=0.4122
 
 Reproduce it from the hash in the report — that's the whole point.
 
+## External Event-Market Intelligence (S3)
+
+The additive `markets` namespace reads public event-market data without exposing order-entry or account operations. It is separate from the five-command synthetic research loop:
+
+```bash
+tezcat markets providers
+tezcat markets events kalshi --limit 20
+tezcat markets list polymarket --limit 20
+tezcat markets datasets
+tezcat markets snapshot kalshi KX... --source-id example
+```
+
+A snapshot writes a raw response, a canonical normalized response, and a checksum-bearing dataset manifest under the configured data directory. Repeating an identical response is idempotent; changed raw data receives a new immutable dataset version. The command is manual and bounded in public-demo mode; it never places orders, accesses wallets/accounts, or schedules provider polling. See [external_markets.md](external_markets.md) for provider paths, probability semantics, Polymarket authentication limits, report/reproduction identity checks, and the approval-gated research bridge.
+
 ## Where things live
 
 All artifacts are plain JSON under the data directory
 (`$TEZCAT_DATA_DIR`, default `./data`): `registry/versions/` (immutable
 experiment records), `registry/results/<batch>/` (seed-level rows with all
-hashes), `registry/analysis/`, `registry/reports/`. Nothing needs a
-database, the network, or AWS.
+hashes), `registry/analysis/`, `registry/reports/`, and `artifacts/external/`
+(raw, normalized, manifest, and signature artifacts). Nothing needs a database,
+the network, or AWS for offline tests; live provider reads are explicit and
+read-only.

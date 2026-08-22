@@ -127,6 +127,46 @@ export const api = {
   researchReport: (ref) => apiGet(`/research/experiments/${encodeURIComponent(ref)}/report`),
   researchReproduce: (ref, body) =>
     apiPost(`/research/experiments/${encodeURIComponent(ref)}/reproduce`, body || {}),
+
+  // Scenarios (Phase S2): mutable drafts -> canonical experiment path
+  scenarioTemplates: () => apiGet('/scenarios/templates'),
+  scenarioFromPreset: (presetId) => apiGet(`/scenarios/from-preset/${encodeURIComponent(presetId)}`),
+  scenarioValidate: (spec) => apiPost('/scenarios/validate', { spec }),
+  scenarioRegister: (spec) => apiPost('/scenarios/register', { spec }),
+  scenarios: () => apiGet('/scenarios'),
+  scenarioSave: (name, spec) => apiPost('/scenarios', { name, spec }),
+  scenarioGet: (id) => apiGet(`/scenarios/${encodeURIComponent(id)}`),
+  scenarioUpdate: (id, name, spec) =>
+    request(`/scenarios/${encodeURIComponent(id)}`, {
+      method: 'PUT', body: JSON.stringify({ name, spec }),
+    }),
+  scenarioDelete: (id) =>
+    request(`/scenarios/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  scenarioDuplicate: (id) => apiPost(`/scenarios/${encodeURIComponent(id)}/duplicate`),
+
+  // TradeOps (Phase S2)
+  opsStatus: () => apiGet('/ops/status'),
+  opsWorkers: () => apiGet('/ops/workers'),
+  opsJobs: (state) => apiGet(`/ops/jobs${state ? `?state=${state}` : ''}`),
+  opsJob: (id) => apiGet(`/ops/jobs/${encodeURIComponent(id)}`),
+  opsSubmit: (versionRef) => apiPost('/ops/jobs', { version_ref: versionRef }),
+  opsCancel: (id) => apiPost(`/ops/jobs/${encodeURIComponent(id)}/cancel`),
+  opsRetry: (id) => apiPost(`/ops/jobs/${encodeURIComponent(id)}/retry`),
+
+  // External Event-Market Intelligence Layer (S3): read-only provider data.
+  externalProviders: () => apiGet('/markets/providers'),
+  externalEvents: (provider = 'kalshi', params = '') => apiGet(`/markets/events?provider=${encodeURIComponent(provider)}${params}`),
+  externalMarkets: (provider = 'kalshi', params = '') => apiGet(`/markets/markets?provider=${encodeURIComponent(provider)}${params}`),
+  externalMarket: (provider, id) => apiGet(`/markets/${encodeURIComponent(id)}?provider=${encodeURIComponent(provider)}`),
+  externalOrderbook: (provider, id, tokenId = '') => apiGet(`/markets/${encodeURIComponent(id)}/orderbook?provider=${encodeURIComponent(provider)}${tokenId ? `&token_id=${encodeURIComponent(tokenId)}` : ''}`),
+  externalHistory: (provider, id, params = '') => apiGet(`/markets/${encodeURIComponent(id)}/history?provider=${encodeURIComponent(provider)}${params}`),
+  externalSnapshot: (provider, id, body = {}) => apiPost(`/markets/${encodeURIComponent(id)}/snapshot?provider=${encodeURIComponent(provider)}`, body),
+  externalDatasets: (provider = '') => apiGet(`/markets/datasets${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
+  externalDataset: (id) => apiGet(`/markets/datasets/${encodeURIComponent(id)}`),
+  externalSignature: (id, body = {}) => apiPost(`/markets/datasets/${encodeURIComponent(id)}/signature`, body),
+  externalDivergence: (body) => apiPost('/markets/divergence', body),
+  externalProposal: (body) => apiPost('/markets/research', body),
+  externalCompile: (body) => apiPost('/markets/research/compile', body),
 };
 
 // ---- small formatting helpers shared by pages ----------------------------

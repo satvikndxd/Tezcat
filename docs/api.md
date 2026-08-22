@@ -152,5 +152,28 @@ Fired shock events:
 Writes JSON artifacts (config, trades, snapshots, metrics, events, report) to the
 artifact store; returns `{ "export_id", "files": [paths], "s3_prefix" }`.
 
+## External Event-Market Intelligence (S3-A)
+
+These additive endpoints are read-only. They discover and observe public Kalshi and Polymarket data, preserve raw and normalized snapshots, and never place orders or expose wallets, account state, private keys, arbitrage automation, or financial advice. Provider failures, schema drift, invalid probabilities, and rate limits are returned explicitly.
+
+| Method | Route | Result |
+| --- | --- | --- |
+| `GET` | `/api/markets/providers` | configured observed providers and adapter versions |
+| `GET` | `/api/markets/events?provider=kalshi` | normalized `OBSERVED` event discovery |
+| `GET` | `/api/markets/markets?provider=polymarket` | normalized `OBSERVED` market discovery |
+| `GET` | `/api/markets/{market_id}?provider=...` | normalized `OBSERVED` market detail |
+| `GET` | `/api/markets/{market_id}/orderbook?provider=...` | one observed order book with provider-native levels retained |
+| `GET` | `/api/markets/{market_id}/history?provider=...` | documented public history; Polymarket uses CLOB price history |
+| `GET` | `/api/markets/{market_id}/trades?provider=kalshi` | Kalshi public trades; Polymarket returns an explicit unauthenticated-surface error |
+| `POST` | `/api/markets/{market_id}/snapshot` | manual immutable raw + normalized dataset registration |
+| `GET` | `/api/markets/datasets` | registered immutable dataset manifests |
+| `GET` | `/api/markets/datasets/{dataset_id}` | manifest and normalized artifact |
+| `POST` | `/api/markets/datasets/{dataset_id}/signature` | `INFERRED` observed signature |
+| `POST` | `/api/markets/divergence` | descriptive cross-provider probability divergence, not arbitrage |
+| `POST` | `/api/markets/research` | `HYPOTHESIS` proposal with `approved: false` |
+| `POST` | `/api/markets/research/compile` | explicit approval required; returns a normal `ExperimentVersion` tagged `MODEL_RESULT` |
+
+The compile response contains an external research manifest and persists the same dataset/signature identity in `ExperimentVersion.external_context`. The identity includes raw and normalized checksums, provider/event/market IDs, time window, adapter/schema versions, and signature checksum. Existing report and reproduce endpoints render and verify this identity.
+
 ## Errors
 `{ "detail": "message" }` with appropriate 4xx status.

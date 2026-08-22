@@ -89,9 +89,12 @@ class RunManager:
                     "event_hash": engine.event_hash(),
                     "event_log_chain": engine.events_log.chain,
                 }
+                # Persist artifacts before exposing terminal completion to API
+                # readers; otherwise a polling client can observe completed
+                # status while the event artifact is still being written.
+                self._persist_artifacts(lr)
                 run.status = "completed"
                 run.completed_at = _now()
-                self._persist_artifacts(lr)
                 log.info("run %s completed: %s steps, %s trades",
                          run.run_id, engine.step_num, len(engine.trades))
         except Exception as exc:  # noqa: BLE001

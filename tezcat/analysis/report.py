@@ -40,6 +40,18 @@ def build_report(registry: Registry, version_id: str) -> str:
     if summary is None:
         summary = aggregate(registry, version_id)
 
+    external = record.get("external_context")
+    external_manifest = registry.get_external_manifest(version_id) if external else None
+    if external:
+        if not external_manifest:
+            raise ValueError("external context has no persisted research manifest")
+        if external_manifest.get("experiment_hash") != record["research_hash"]:
+            raise ValueError("external research manifest does not match research hash")
+        if external_manifest.get("dataset_hash") != external.get("dataset_checksum"):
+            raise ValueError("external research manifest does not match dataset checksum")
+        if external_manifest.get("signature_hash") != external.get("signature_hash"):
+            raise ValueError("external research manifest does not match signature checksum")
+
     design = record["design"]
     lines: List[str] = []
     add = lines.append
@@ -163,7 +175,22 @@ def build_report(registry: Registry, version_id: str) -> str:
     add(f"- Reproduce: register this version from its stored record, run "
         f"`BatchRunner(registry).run(\"{version_id}\")`, then "
         f"`analyze(registry, \"{version_id}\", seed={analysis['analysis_seed']})`.")
-    add("")
+    if external:
+        add("")
+        add("### External research context")
+        add("")
+        add("This is observed provider context and an inferred signature identity; "
+            "it did not become synthetic market state and does not establish causality.")
+        add("")
+        add("| Field | Value |\n| --- | --- |")
+        add(f"| Provider | {external.get('provider', '—')} |")
+        add(f"| Dataset | `{external.get('dataset_id', '—')}` |")
+        add(f"| Normalized dataset checksum | `{external.get('dataset_checksum', '—')}` |")
+        add(f"| Raw dataset checksum | `{external.get('raw_checksum', '—')}` |")
+        add(f"| Signature | `{external.get('signature_id', '—')}` |")
+        add(f"| Signature checksum | `{external.get('signature_hash', '—')}` |")
+        add(f"| Market IDs | {', '.join(external.get('market_ids') or ['—'])} |")
+        add("")
     add("*All numbers in this report are read from persisted artifacts "
         "(batch summary and analysis result); none are computed at render "
         "time. Results describe the specified synthetic model only.*")
@@ -175,7 +202,8 @@ def build_report(registry: Registry, version_id: str) -> str:
         "analysis_id": analysis["analysis_id"],
         "batch_id": summary["batch_id"],
         "report_hash": hashlib.sha256(markdown.encode()).hexdigest(),
-        "sources": ["version record", "batch summary", "analysis result"],
+        "sources": ["version record", "batch summary", "analysis result"]
+        + (["external dataset manifest and checksums"] if external else []),
     }
     registry.save_report(version_id, markdown, meta)
     return markdown

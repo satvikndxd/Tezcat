@@ -59,8 +59,15 @@ The repository launcher remains available as `scripts/run_local.sh`. It still bu
 | `TEZCAT_PUBLIC_MAX_ACTIVE_BATCHES` | `1` | Not applied locally |
 | `TEZCAT_PUBLIC_MAX_ACTIVE_RUNS` | `1` | Not applied locally |
 | `TEZCAT_PUBLIC_MAX_SERIES` | `2000` | Not applied locally |
+| `TEZCAT_PUBLIC_MAX_EXTERNAL_ITEMS` | `50` | Not applied locally |
+| `TEZCAT_PUBLIC_MAX_EXTERNAL_DATASETS` | `25` | Not applied locally |
+| `TEZCAT_PUBLIC_EXTERNAL_MIN_INTERVAL` | `10` seconds | Not applied locally |
 
-The public guardrails are enforced only at the API boundary. They reject oversized public requests or return a temporary capacity response; they do not modify engine execution, configuration hashing, seed allocation, batch ordering, artifact contents, or reproducibility semantics.
+The public guardrails are enforced only at the API boundary. They reject oversized public requests or return a temporary capacity response; they do not modify engine execution, configuration hashing, seed allocation, batch ordering, artifact contents, or reproducibility semantics. S3-A adds the same boundary for external observations: discovery is item-capped, snapshot registration is dataset-count and refresh-interval capped, and no scheduled provider scraper is configured.
+
+## External Event-Market Intelligence demo rule
+
+The MARKETS page is read-only. The public service should expose previously registered, terms-reviewed external datasets by default; live provider reads are manual, server-side, rate-aware, and bounded. Each dataset retains provider terms and permitted-use text. No provider credentials are sent to the frontend, and the S3-A layer does not place orders, access accounts or wallets, run arbitrage, or provide financial advice. Render’s ephemeral filesystem means user-created external snapshots should be treated as temporary demo state unless the existing optional AWS artifact store is deliberately configured.
 
 ## Research demo and persistence
 

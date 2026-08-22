@@ -521,3 +521,26 @@ select.inp option {
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: rgba(255, 153, 0, 0.06); }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+
+/* ---- S2: scenario builder + tradeops -------------------------------- */
+.hero-split { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 16px; }
+.hero-card {
+  border: 1px solid var(--border-2); padding: 16px; background: var(--panel);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.hero-card.primary { border-color: rgba(255, 153, 0, 0.5); }
+.hero-title { font-size: 20px; color: var(--ink-bright); font-weight: 700; }
+.wizard-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.wizstep {
+  background: none; border: 1px solid var(--border-2); color: var(--dim);
+  font: inherit; font-size: 11px; letter-spacing: 1px; padding: 5px 10px; cursor: pointer;
+}
+.wizstep.active { color: var(--accent); border-color: rgba(255, 153, 0, 0.5); }
+.wizstep.done { color: var(--ink); }
+.timeline { display: flex; flex-direction: column; gap: 4px; }
+.timeline-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+select, input[type="number"], input:not([type]) {
+  background: #0a0d10; border: 1px solid var(--border-2); color: var(--ink-bright);
+  font: inherit; font-size: 12px; padding: 5px 8px; width: 100%;
+}

@@ -25,5 +25,11 @@ services:
         value: "1"
       - key: TEZCAT_PUBLIC_MAX_SERIES
         value: "2000"
+      - key: TEZCAT_PUBLIC_MAX_EXTERNAL_ITEMS
+        value: "50"
+      - key: TEZCAT_PUBLIC_MAX_EXTERNAL_DATASETS
+        value: "25"
+      - key: TEZCAT_PUBLIC_EXTERNAL_MIN_INTERVAL
+        value: "10"
       - key: TEZCAT_CORS_ORIGINS
         value: "https://satvikndxd.github.io,http://localhost:5173,http://localhost:4173"

@@ -1,0 +1,66 @@
+{
+  "fixture_type": "RECORDED PROVIDER RESPONSE",
+  "provider": "kalshi",
+  "event": {
+    "event_ticker": "KXTEST-EVENT",
+    "title": "Will the test event happen?",
+    "category": "test",
+    "status": "open",
+    "series_ticker": "KXTEST"
+  },
+  "market": {
+    "ticker": "KXTEST-YES",
+    "event_ticker": "KXTEST-EVENT",
+    "title": "Will the test event happen?",
+    "subtitle": "Resolves YES if the event occurs",
+    "status": "open",
+    "open_time": "2026-01-01T00:00:00Z",
+    "close_time": "2026-12-31T00:00:00Z",
+    "yes_bid_dollars": "0.42",
+    "no_bid_dollars": "0.55",
+    "volume_fp": "120.00"
+  },
+  "orderbook": {
+    "orderbook_fp": {
+      "yes_dollars": [["0.42", "10.00"], ["0.40", "15.00"]],
+      "no_dollars": [["0.55", "12.00"], ["0.52", "20.00"]]
+    }
+  },
+  "trades": {
+    "trades": [
+      {
+        "trade_id": "trade-1",
+        "ticker": "KXTEST-YES",
+        "count_fp": "3.00",
+        "yes_price_dollars": "0.43",
+        "no_price_dollars": "0.57",
+        "taker_outcome_side": "yes",
+        "taker_book_side": "bid",
+        "created_time": "2026-08-22T00:00:00Z",
+        "is_block_trade": false
+      }
+    ],
+    "cursor": ""
+  },
+  "candlesticks": {
+    "ticker": "KXTEST-YES",
+    "candlesticks": [
+      {
+        "end_period_ts": 1787356800,
+        "yes_bid": {"open_dollars": "0.40", "close_dollars": "0.42"},
+        "yes_ask": {"open_dollars": "0.44", "close_dollars": "0.46"},
+        "price": {"open_dollars": "0.42", "close_dollars": "0.44", "mean_dollars": "0.43"},
+        "volume_fp": "10.00",
+        "open_interest_fp": "20.00"
+      },
+      {
+        "end_period_ts": 1787360400,
+        "yes_bid": {"open_dollars": "0.44", "close_dollars": "0.50"},
+        "yes_ask": {"open_dollars": "0.46", "close_dollars": "0.54"},
+        "price": {"open_dollars": "0.44", "close_dollars": "0.52", "mean_dollars": "0.48"},
+        "volume_fp": "20.00",
+        "open_interest_fp": "25.00"
+      }
+    ]
+  }
+}

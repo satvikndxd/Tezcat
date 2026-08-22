@@ -30,11 +30,13 @@ class RegistryError(ValueError):
 
 
 class Registry:
-    def __init__(self, root: str = "data"):
+    def __init__(self, root: str = "data", *, artifact_store: Any = None):
         self.root = Path(root) / "registry"
+        self.artifact_store = artifact_store
         (self.root / "versions").mkdir(parents=True, exist_ok=True)
         (self.root / "batches").mkdir(parents=True, exist_ok=True)
         (self.root / "results").mkdir(parents=True, exist_ok=True)
+        (self.root / "external_manifests").mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
     # -- io ------------------------------------------------------------
@@ -62,6 +64,27 @@ class Registry:
 
     def _index(self) -> Dict[str, Dict[str, Any]]:
         return self._read(self.root / "index.json") or {}
+
+    def external_dataset_store(self):
+        """Return the dataset store sharing this registry's artifact backend."""
+        from tezcat.external.datasets import ExternalDatasetStore
+        if self.artifact_store is not None:
+            return ExternalDatasetStore(self.artifact_store)
+        from tezcat.persistence.local import LocalStore
+        return ExternalDatasetStore(LocalStore(str(self.root.parent)))
+
+    def save_external_manifest(self, version_id: str, manifest: Dict[str, Any]) -> Dict[str, Any]:
+        """Write the bridge manifest once and return the persisted copy."""
+        path = self.root / "external_manifests" / f"{version_id}.json"
+        with self._lock:
+            existing = self._read(path)
+            if existing is not None:
+                return existing
+            self._write(path, manifest)
+        return manifest
+
+    def get_external_manifest(self, version_id: str) -> Optional[Dict[str, Any]]:
+        return self._read(self.root / "external_manifests" / f"{version_id}.json")
 
     # -- versions ------------------------------------------------------
     def register(self, version: ExperimentVersion) -> str:

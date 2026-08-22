@@ -21,6 +21,7 @@ demonstration, not evidence.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import Field, model_validator
@@ -261,7 +262,8 @@ class ExperimentVersion:
     def __init__(self, experiment_id: str, name: str, config: ExperimentConfig,
                  design: DesignSpec, root_seed: Optional[int] = None,
                  model_card: Optional[ModelCard] = None,
-                 parent_version_id: Optional[str] = None):
+                 parent_version_id: Optional[str] = None,
+                 external_context: Optional[Dict[str, Any]] = None):
         self.experiment_id = experiment_id
         self.name = name
         self.config = config
@@ -269,6 +271,12 @@ class ExperimentVersion:
         self.root_seed = config.default_seed if root_seed is None else root_seed
         self.model_card = model_card or default_model_card()
         self.parent_version_id = parent_version_id
+        # External observations are optional research context.  Store a detached,
+        # JSON-normalized copy so later caller mutation cannot change identity.
+        self.external_context = (
+            json.loads(canonical_json(external_context))
+            if external_context is not None else None
+        )
 
         # Resolve every cell now; fail loudly before registration.
         self.cell_configs: List[Dict[str, Any]] = []
@@ -303,6 +311,10 @@ class ExperimentVersion:
             "root_seed": self.root_seed,
             "parent_version_id": self.parent_version_id,
         }
+        # Keep the legacy hash payload byte-for-byte compatible when no external
+        # context exists; S3-linked versions intentionally receive new identities.
+        if self.external_context is not None:
+            payload["external_context"] = self.external_context
         return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
 
     # ------------------------------------------------------------------
@@ -351,6 +363,7 @@ class ExperimentVersion:
             "cells": self.cell_configs,
             "planned_runs": self.design.planned_runs(),
             "model_card": self.model_card.model_dump(mode="json"),
+            "external_context": self.external_context,
         }
 
     @classmethod
@@ -362,6 +375,7 @@ class ExperimentVersion:
             root_seed=d["root_seed"],
             model_card=ModelCard.model_validate(d["model_card"]),
             parent_version_id=d.get("parent_version_id"),
+            external_context=d.get("external_context"),
         )
         if ev.research_hash != d["research_hash"]:
             raise ValueError(

@@ -5,6 +5,9 @@ import Experiment from './pages/Experiment.jsx';
 import Run from './pages/Run.jsx';
 import Report from './pages/Report.jsx';
 import Research from './pages/Research.jsx';
+import Build from './pages/Build.jsx';
+import Ops from './pages/Ops.jsx';
+import Markets from './pages/Markets.jsx';
 
 // ---- tiny hash router ----------------------------------------------------
 
@@ -12,8 +15,13 @@ function parseRoute() {
   const hash = window.location.hash || '#/';
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts.length === 0) return { page: 'home' };
+  if (parts[0] === 'build') return { page: 'build' };
+  if (parts[0] === 'ops') return { page: 'ops' };
   if (parts[0] === 'research') {
     return { page: 'research', id: parts[1] ? decodeURIComponent(parts[1]) : null };
+  }
+  if (parts[0] === 'markets') {
+    return { page: 'markets' };
   }
   if (parts[0] === 'experiment' && parts[1]) {
     return { page: 'experiment', id: decodeURIComponent(parts[1]) };
@@ -65,7 +73,10 @@ function StatusBar() {
     <header className="statusbar">
       <div className="brand">
         <a href="#/">TEZCAT — MARKET ECOLOGY LAB</a>
+        <a className="navlink" href="#/build">BUILD</a>
         <a className="navlink" href="#/research">RESEARCH</a>
+        <a className="navlink" href="#/ops">TRADEOPS</a>
+        <a className="navlink" href="#/markets">MARKETS</a>
       </div>
       <div className="right">
         <Clock />
@@ -92,6 +103,15 @@ export default function App() {
       break;
     case 'research':
       page = <Research id={route.id} key={route.id || 'list'} />;
+      break;
+    case 'build':
+      page = <Build />;
+      break;
+    case 'ops':
+      page = <Ops />;
+      break;
+    case 'markets':
+      page = <Markets />;
       break;
     default:
       page = <Home />;

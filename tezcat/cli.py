@@ -197,6 +197,55 @@ def cmd_reproduce(args) -> int:
     return 1
 
 
+def cmd_markets(args) -> int:
+    from tezcat.external.service import ExternalMarketService
+    from tezcat.persistence.local import LocalStore
+
+    service = ExternalMarketService(LocalStore(_data_dir(args)))
+    if args.markets_command == "providers":
+        for provider in service.provider_ids():
+            adapter = service.provider(provider)
+            print(f"{provider:<12} read-only  {adapter.adapter_version}")
+        return 0
+    if args.markets_command == "datasets":
+        rows = service.datasets.list(args.provider)
+        if not rows:
+            print("no external datasets registered")
+            return 0
+        for row in rows:
+            print(f"{row['dataset_id']:<26} {row['provider']:<12} v{row['dataset_version']}  {row['source_id']}")
+        return 0
+    if args.markets_command == "events":
+        page = service.list_events(args.provider, limit=args.limit, status=args.status)
+        adapter = service.provider(args.provider)
+        for row in page.items:
+            event = adapter.normalize_event(row)
+            print(f"{event.event_id:<24} {event.title}")
+        if page.cursor:
+            print(f"next_cursor: {page.cursor}")
+        return 0
+    if args.markets_command == "list":
+        page = service.list_markets(args.provider, limit=args.limit, status=args.status, event_id=args.event_id)
+        adapter = service.provider(args.provider)
+        for row in page.items:
+            market = adapter.normalize_market(row)
+            print(f"{market.market_id:<32} {market.title}")
+        if page.cursor:
+            print(f"next_cursor: {page.cursor}")
+        return 0
+    if args.markets_command == "snapshot":
+        history = json.loads(Path(args.history_json).read_text()) if args.history_json else None
+        trades = json.loads(Path(args.trades_json).read_text()) if args.trades_json else None
+        result = service.snapshot(args.provider, args.market_id, token_id=args.token_id, history=history, trades=trades, source_id=args.source_id)
+        print(f"{OK} external dataset registered: {result['manifest']['dataset_id']}")
+        print(f"  provider:          {result['manifest']['provider']}")
+        print(f"  raw checksum:      {result['manifest']['raw_checksum']}")
+        print(f"  normalized checksum:{result['manifest']['normalized_checksum']}")
+        return 0
+    print(f"{BAD} unknown markets command", file=sys.stderr)
+    return 1
+
+
 def cmd_list(args) -> int:
     registry = _registry(args)
     rows = registry.list()
@@ -251,6 +300,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     ls = sub.add_parser("list", help="list registered experiments")
     ls.set_defaults(func=cmd_list)
+
+    markets = sub.add_parser("markets", help="read-only external event-market intelligence")
+    markets_sub = markets.add_subparsers(dest="markets_command", required=True)
+    mp = markets_sub.add_parser("providers", help="list configured read-only providers")
+    mp.set_defaults(func=cmd_markets)
+    md = markets_sub.add_parser("datasets", help="list immutable external datasets")
+    md.add_argument("--provider", default=None)
+    md.set_defaults(func=cmd_markets)
+    me = markets_sub.add_parser("events", help="discover provider events")
+    me.add_argument("provider", choices=["kalshi", "polymarket"])
+    me.add_argument("--limit", type=int, default=20)
+    me.add_argument("--status", default=None)
+    me.set_defaults(func=cmd_markets)
+    mm = markets_sub.add_parser("list", help="discover provider markets")
+    mm.add_argument("provider", choices=["kalshi", "polymarket"])
+    mm.add_argument("--limit", type=int, default=20)
+    mm.add_argument("--status", default=None)
+    mm.add_argument("--event-id", default=None)
+    mm.set_defaults(func=cmd_markets)
+    ms = markets_sub.add_parser("snapshot", help="collect a read-only snapshot and persist raw/normalized lineage")
+    ms.add_argument("provider", choices=["kalshi", "polymarket"])
+    ms.add_argument("market_id")
+    ms.add_argument("--token-id", default=None)
+    ms.add_argument("--source-id", default=None)
+    ms.add_argument("--history-json", default=None, help="optional JSON kwargs for documented history")
+    ms.add_argument("--trades-json", default=None, help="optional JSON kwargs for documented trades")
+    ms.set_defaults(func=cmd_markets)
     return p
 
 

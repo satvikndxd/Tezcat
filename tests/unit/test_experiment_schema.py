@@ -275,3 +275,26 @@ def test_registry_queries_at_scale(tmp_path):
     elapsed = time.time() - t0
     assert [k["version_id"] for k in kids] == ["expv_000000000042"]
     assert elapsed < 5.0, f"registry queries too slow at 10k records: {elapsed:.1f}s"
+
+
+def test_external_context_changes_research_identity_and_is_detached():
+    context = {
+        "data_class": "OBSERVED_CONTEXT",
+        "dataset_id": "extds_fixture",
+        "dataset_checksum": "a" * 64,
+        "raw_checksum": "b" * 64,
+        "provider": "kalshi",
+        "market_ids": ["KXTEST-YES"],
+        "signature_id": "sig_fixture",
+        "signature_hash": "c" * 64,
+    }
+    ev = ExperimentVersion("exp1", "x", _base_config(), _ab_design(), external_context=context)
+    context["dataset_checksum"] = "d" * 64
+    assert ev.external_context["dataset_checksum"] == "a" * 64
+    changed = ExperimentVersion(
+        "exp1", "x", _base_config(), _ab_design(),
+        external_context={**ev.external_context, "dataset_checksum": "d" * 64},
+    )
+    assert changed.research_hash != ev.research_hash
+    loaded = ExperimentVersion.from_dict(ev.to_dict())
+    assert loaded.research_hash == ev.research_hash
