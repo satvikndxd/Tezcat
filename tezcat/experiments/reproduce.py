@@ -24,7 +24,6 @@ from typing import Any, Dict, List, Optional
 from tezcat.engine.ecology import EcologyEngine
 from tezcat.experiments.batch import batch_id_for
 from tezcat.experiments.registry import Registry, RegistryError
-from tezcat.external.schemas import checksum
 
 
 class ReproductionError(ValueError):
@@ -70,24 +69,27 @@ def reproduce(registry: Registry, ref: str,
 
     external_context = version.external_context
     if external_context is not None:
+        # Reproduction of an external-data experiment means re-executing it
+        # *against the exact dataset version it was built from*: the stored
+        # manifest must match the hashed context, and the on-disk artifacts
+        # must re-hash to their registered checksums (the store re-verifies
+        # them on load and raises on any tamper).
         try:
             dataset_store = registry.external_dataset_store()
             dataset_id = external_context.get("dataset_id")
             manifest = dataset_store.get(dataset_id)
-            normalized = dataset_store.load_artifact(dataset_id, "normalized.json")
-            raw = dataset_store.load_artifact(dataset_id, "raw.json")
+            dataset_store.observations(dataset_id)   # checksum-verified load
+            if manifest.raw_checksum:
+                dataset_store.raw(dataset_id)        # checksum-verified load
             checksums_ok = (
-                isinstance(normalized, (dict, list))
-                and isinstance(raw, (dict, list))
-                and checksum(normalized) == external_context.get("dataset_checksum")
-                and checksum(raw) == external_context.get("raw_checksum")
-                and manifest.get("normalized_checksum") == external_context.get("dataset_checksum")
-                and manifest.get("raw_checksum") == external_context.get("raw_checksum")
+                manifest.dataset_hash == external_context.get("dataset_hash")
+                and manifest.normalized_checksum == external_context.get("dataset_checksum")
+                and manifest.raw_checksum == external_context.get("raw_checksum")
             )
             check(
                 "external dataset identity verified",
                 checksums_ok,
-                f"{dataset_id}: raw and normalized checksums"
+                f"{dataset_id}: dataset hash + raw/normalized checksums"
                 if checksums_ok else f"{dataset_id}: checksum or manifest mismatch",
             )
             if not checksums_ok:

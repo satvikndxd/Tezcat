@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-231_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-337_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -53,10 +53,10 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 | **Risk Engine & Stress Lab** | [Margin buying, event-driven liquidation *process*, VaR/Expected Shortfall, pump-and-dump stress scenarios](docs/risk.md) — endogenous margin spirals, opt-in per experiment |
 | **Stylized Facts & Calibration** | [Cont-style feature extraction, real-vs-synthetic ensemble comparison, budgeted grid calibration with *enforced* out-of-sample validation](docs/calibration.md) — file-based data lineage, fully offline |
 | **Research CLI & API** | [`tezcat run / analyze / report / reproduce / list`](docs/cli.md) + the same loop under `/api/research` and a dashboard **RESEARCH** section — the complete loop with zero knowledge of internals |
-| **External Event-Market Intelligence (S3-A)** | Additive, read-only Kalshi/Polymarket snapshot adapters, raw-to-normalized lineage, immutable dataset manifests, cautious event matching, observed signatures, descriptive divergence, bounded dashboard/CLI/API surfaces, and an approval-gated bridge back into ordinary `ExperimentVersion` objects — [S3 guide](docs/external_markets.md) |
 | **Parallel & Hardened** | [`--workers N` process-pool replications (byte-identical for any worker count), fault-injection-tested storage, differential reference matcher, environment-aware benchmarks](docs/benchmarks.md) |
 | **Scenario Builder** | [Design your own market in the dashboard](docs/scenarios.md): agents, behavior, risk, shock timeline — compiled into the canonical experiment schema with the research identity previewed before you run; templates, drafts, import/export |
 | **TradeOps** | [Operational layer around execution](docs/scenarios.md): queue, workers, explicit failures, identity-preserving retries, duplicate-execution guard, env-configurable capacity guardrails |
+| **External Event-Market Intelligence** | [Read-only Kalshi + Polymarket adapters](docs/markets.md): immutable checksummed datasets, market-implied probability proxies with named transforms, event signatures, cross-provider divergence & lead/lag, and an observed-event → ordinary-experiment research bridge — external data feeds calibration and design, **never** the kernel |
 | **REST API + Dashboard** | FastAPI control plane; minimalist Bloomberg-style black terminal UI (React + custom SVG charts) |
 | **Cloud (optional)** | S3-layout artifact store, DynamoDB adapters, SAM template; everything runs fully local without AWS |
 
@@ -82,6 +82,18 @@ tezcat analyze expv_417305c181af            # bootstrap CIs, permutation p, effe
 tezcat report  expv_417305c181af -o report.md
 tezcat reproduce 417305c1                   # re-execute + verify every stored hash
 tezcat list
+```
+
+And, since S3, the same loop can start from a real prediction-market
+observation (fully offline via labeled fixtures — see [docs/markets.md](docs/markets.md)):
+
+```bash
+tezcat markets import kalshi SYN-MKT-YES \
+    --fixture tests/fixtures/external/kalshi/synthetic_event.json
+tezcat markets signature exd_7efa04e705bc    # documented, hashed event signature
+tezcat markets research exd_7efa04e705bc \
+    --mechanisms herding,mm_withdrawal --run # → an ordinary ExperimentVersion
+tezcat analyze expv_…                        # then the loop above, unchanged
 ```
 
 `reproduce` takes the research hash you'd cite in a paper (any unambiguous
@@ -182,10 +194,6 @@ GET  /api/runs/{id}         (pause/resume/cancel)
 POST /api/runs/{id}/shocks   ← inject shocks into a live market
 GET  /api/runs/{id}/market | history | trades | metrics | shocks | regimes | report
 POST /api/runs/{id}/export
-GET  /api/markets/providers | events | markets | datasets
-GET  /api/markets/{id}/orderbook | history   (read-only external data)
-POST /api/markets/{id}/snapshot | /datasets/{id}/signature
-POST /api/markets/research  (proposal) | /research/compile  (approval-gated)
 ```
 
 Completed runs persist a `manifest.json` with per-artifact SHA-256 checksums plus schema/code/config/seed/state/event provenance, and an `events/events.json` artifact carrying the full hash-chained event log.
@@ -247,14 +255,13 @@ tezcat/
 ├── microstructure/      # microprice, spreads, impact, queue, fills, TCA
 ├── risk/                # margin engine, liquidation process, VaR/ES, stress scenarios
 ├── data/  calibration/  # file-based series providers; budgeted out-of-sample calibration
-├── external/            # read-only event-market adapters, lineage, signatures, bridge
 ├── persistence/         # local JSON store + AWS (DynamoDB/S3) store
 ├── cli.py               # tezcat run / analyze / report / reproduce / list
 └── api/                 # FastAPI app, run manager, Lambda handlers, research API
 frontend/                # React dashboard (Vite, custom SVG charts)
 examples/                # ready-to-run experiment specs (margin spiral AB)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 231 tests: unit / property / determinism / replay / differential / fault
+tests/                   # 337 tests: unit / property / determinism / replay / differential / fault / external
 ```
 
 ## Public deployment
@@ -273,7 +280,6 @@ Local-first: everything runs without AWS. To deploy, see [`docs/deployment.md`](
 4. **Events, not just state** — every order, trade, reservation, shock, and regime transition is in the hash-chained log; replay reconstructs the exact market, and metrics carry lineage to source events.
 5. **One seed is not evidence** — comparative designs require replications; analyses carry uncertainty; reports render from artifacts only and state what the model does *not* support.
 6. **Engines are independent** — the core engine has zero AWS/HTTP dependencies; cloud is an optional adapter, never a semantic layer.
-7. **External data is not synthetic state** — provider payloads remain observed artifacts; only explicit, approved research proposals may compile into ordinary synthetic experiments, and no adapter exposes trading/account controls.
 
 ## Implementation status vs. research roadmap
 
@@ -294,11 +300,9 @@ Tezcat is being hardened from an MVP artificial-market laboratory into a researc
 | F10 | Research CLI, research API, dashboard research section | ✅ | [docs/cli.md](docs/cli.md) |
 | F11 | Parallel workers, fault injection, differential matcher, benchmarks | ✅ | [docs/benchmarks.md](docs/benchmarks.md) |
 | S2 | Custom Scenario Builder, TradeOps, Docker/Daytona prep | ✅ | [docs/scenarios.md](docs/scenarios.md) · [docs/docker.md](docs/docker.md) |
-| S3-A | External Event-Market Intelligence foundation — read-only Kalshi/Polymarket snapshot adapters, immutable lineage, signatures, API, CLI, dashboard, bounded public-demo controls, and durable report/reproduce identity checks | 🟡 foundation | [docs/external_markets.md](docs/external_markets.md) |
+| S3 | External event-market intelligence: Kalshi/Polymarket read-only adapters, immutable datasets, signatures, cross-provider research, observed→synthetic bridge, MARKETS section | ✅ | [docs/markets.md](docs/markets.md) |
 
-Not yet implemented (target roadmap, not current facts): resolution-based calibration of external probabilities, WebSocket/live-stream collectors, unrestricted public Polymarket trade history, order-book reconstruction from increments, persistent human review UI and confirmed-match comparison workflows, TradeOps reuse, scenario-builder integration, automatic refresh, multi-machine distributed execution (single-machine parallel workers exist), latency modeling, and funding-network contagion. The S3 layer is read-only and its external observations are not real-market validation. Single-seed preset outputs are demonstrations, not evidence.
-
-**Known validation blocker.** The complete repository suite currently stops during collection because `tests/unit/test_stylized_facts.py` imports the missing pre-existing module `tezcat.data.providers`. S3-A does not change or mask this calibration-boundary issue; the focused frozen-workflow/S3 suite remains green and the blocker is intentionally left for a separate calibration-maintenance change.
+Not yet implemented (target roadmap, not current facts): live external ingestion is opt-in and unexercised by tests (adapters ship with offline labeled fixtures; no recorded provider data is bundled), WebSocket/streaming ingestion and recorded-stream replay, resolution-calibration studies at scale (needs a legitimately obtained resolved-market corpus), multi-machine distributed execution (single-machine parallel workers exist), latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
 
 ## Documentation index
 
@@ -315,8 +319,8 @@ Not yet implemented (target roadmap, not current facts): resolution-based calibr
 | [docs/cli.md](docs/cli.md) | The researcher guide: five commands, spec format, research API, worked example |
 | [docs/benchmarks.md](docs/benchmarks.md) | Benchmark protocol, parallel-worker correctness, fault-injection findings, differential matcher |
 | [docs/scenarios.md](docs/scenarios.md) | Custom scenarios, scenario/experiment/run semantics, TradeOps queue and guardrails |
+| [docs/markets.md](docs/markets.md) | External event-market intelligence: provider adapters, dataset lineage, event signatures, cross-provider research, the observed→synthetic bridge |
 | [docs/docker.md](docs/docker.md) | Container launch, complete env-var list, public-demo limits, Daytona readiness |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
 | [docs/public-demo.md](docs/public-demo.md) | GitHub Pages + Render public demo deployment, limits, persistence, CI/CD, validation |
-| [docs/external_markets.md](docs/external_markets.md) | S3 read-only Kalshi/Polymarket adapters, canonical schemas, lineage, datasets, signatures, safety boundaries, API, CLI, and research bridge |
 | [docs/audit/F0_baseline.md](docs/audit/F0_baseline.md) | The frozen pre-hardening baseline and audit trail |

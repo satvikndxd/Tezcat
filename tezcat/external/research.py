@@ -199,6 +199,29 @@ def propose_mechanisms(signature: EventSignature) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Signature → ExperimentVersion (the ordinary machinery, nothing bespoke)
 # ---------------------------------------------------------------------------
+def external_context_for(dataset: DatasetManifest,
+                         signature: EventSignature) -> Dict[str, Any]:
+    """Hashable external research context bound into the experiment identity.
+
+    When passed to ``ExperimentVersion`` this makes the dataset + signature
+    part of the research hash itself: ``tezcat reproduce`` then verifies the
+    dataset artifacts against these checksums, and reports render (and
+    cross-check) this lineage. Field names follow the report/reproduce
+    contract in ``tezcat.analysis.report`` / ``tezcat.experiments.reproduce``.
+    """
+    sig_hash = signature.signature_hash()
+    return {
+        "provider": dataset.provider,
+        "dataset_id": dataset.dataset_id,
+        "dataset_hash": dataset.dataset_hash,
+        "dataset_checksum": dataset.normalized_checksum,
+        "raw_checksum": dataset.raw_checksum,
+        "signature_id": f"sig_{sig_hash[:12]}",
+        "signature_hash": sig_hash,
+        "market_ids": list(dataset.market_ids),
+    }
+
+
 def experiment_from_signature(signature: EventSignature, *,
                               mechanisms: Sequence[str],
                               name: str,
@@ -208,7 +231,8 @@ def experiment_from_signature(signature: EventSignature, *,
                               total_steps: int = 1200,
                               root_seed: Optional[int] = None,
                               question: Optional[str] = None,
-                              hypothesis: Optional[str] = None
+                              hypothesis: Optional[str] = None,
+                              dataset: Optional[DatasetManifest] = None
                               ) -> ExperimentVersion:
     """Compile an observed signature into a normal ``ExperimentVersion``.
 
@@ -217,6 +241,10 @@ def experiment_from_signature(signature: EventSignature, *,
     research object — same registry, batch runner, analysis, report, and
     reproduction machinery as every other Tezcat experiment. No separate
     research-identity system.
+
+    When ``dataset`` is supplied, its identity (and the signature hash)
+    enters the research hash as ``external_context`` — reproduction then
+    verifies the experiment *with respect to that exact dataset version*.
     """
     unknown = [m for m in mechanisms if m not in MECHANISMS]
     if unknown:
@@ -260,7 +288,9 @@ def experiment_from_signature(signature: EventSignature, *,
     )
     return ExperimentVersion(experiment_id=experiment_id, name=name,
                              config=config, design=design,
-                             root_seed=root_seed)
+                             root_seed=root_seed,
+                             external_context=(external_context_for(dataset, signature)
+                                               if dataset is not None else None))
 
 
 # ---------------------------------------------------------------------------

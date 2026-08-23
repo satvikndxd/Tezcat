@@ -47,8 +47,8 @@ def build_report(registry: Registry, version_id: str) -> str:
             raise ValueError("external context has no persisted research manifest")
         if external_manifest.get("experiment_hash") != record["research_hash"]:
             raise ValueError("external research manifest does not match research hash")
-        if external_manifest.get("dataset_hash") != external.get("dataset_checksum"):
-            raise ValueError("external research manifest does not match dataset checksum")
+        if external_manifest.get("dataset_hash") != external.get("dataset_hash"):
+            raise ValueError("external research manifest does not match dataset hash")
         if external_manifest.get("signature_hash") != external.get("signature_hash"):
             raise ValueError("external research manifest does not match signature checksum")
 

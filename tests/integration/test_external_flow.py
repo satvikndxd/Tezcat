@@ -75,10 +75,14 @@ def test_milestone_flow(tmp_path, adapter):
     proposal = propose_mechanisms(sig)
     assert any(c["mechanism"] == "herding" for c in proposal["candidates"])
 
-    # 4. compile into an ordinary ExperimentVersion --------------------
+    # 4. compile into an ordinary ExperimentVersion whose research hash
+    #    binds the dataset identity (external_context) ------------------
     version = experiment_from_signature(
         sig, mechanisms=["herding"], name="milestone-event-bridge",
-        replications=2, t0_step=80, total_steps=240)
+        replications=2, t0_step=80, total_steps=240, dataset=dataset)
+    assert version.external_context["dataset_hash"] == dataset.dataset_hash
+    assert version.external_context["dataset_checksum"] == \
+        dataset.normalized_checksum
     registry = Registry(str(tmp_path))
     vid = registry.register(version)
 
@@ -109,6 +113,21 @@ def test_milestone_flow(tmp_path, adapter):
     assert comparison["n_features"] >= 4
     assert comparison["coverage"] is not None
 
-    # 8. reproduce against stored hashes -------------------------------
+    # 8. reproduce against stored hashes AND the exact dataset version -
     result = reproduce(registry, vid, sample=1)
     assert result["success"], result["checks"]
+    dataset_checks = [c for c in result["checks"]
+                      if c["check"] == "external dataset identity verified"]
+    assert dataset_checks and dataset_checks[0]["ok"]
+
+
+def test_bridge_without_dataset_keeps_legacy_identity(adapter):
+    """No external context → the legacy research-hash payload is unchanged."""
+    rows = adapter.get_history("SYN-MKT-YES", 0, 10**10)
+    observations = [MarketObservation.model_validate(r) for r in rows]
+    sig = extract_signature(observations, dataset_id="exd_x", t0_index=36,
+                            pre_window=25, post_window=30)
+    version = experiment_from_signature(sig, mechanisms=["herding"], name="x",
+                                        replications=2, t0_step=80,
+                                        total_steps=240)
+    assert version.external_context is None

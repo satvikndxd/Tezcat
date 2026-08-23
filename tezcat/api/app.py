@@ -23,7 +23,6 @@ from tezcat.experiments.model import ConfigHashMismatch, Experiment, Run
 from tezcat.experiments.presets import build_config, get_preset, list_presets
 from tezcat.persistence.aws import get_store
 from tezcat.api.runner import RunManager
-from tezcat.api.markets import router as markets_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("tezcat.api")
@@ -575,372 +574,368 @@ def api_research_reproduce(ref: str, body: Optional[ReproduceBody] = None):
                      sample=None if body.full else body.sample)
 
 
-# Register the external-market router after all route declarations so its
-# static paths cannot be shadowed by the dynamic market-id path.
+# ---------------------------------------------------------------------------
+# Scenarios (Phase S2): mutable drafts → the canonical experiment path
+# ---------------------------------------------------------------------------
+from tezcat.experiments.scenarios import (  # noqa: E402
+    ScenarioError, ScenarioStore, scenario_from_preset, scenario_templates,
+    validate_spec, version_from_spec,
+)
+
+scenario_store = ScenarioStore(os.environ.get("TEZCAT_DATA_DIR", "data"))
+
+
+class ScenarioBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    spec: Dict[str, Any]
+
+
+class SpecBody(BaseModel):
+    spec: Dict[str, Any]
+
+
+@app.get("/api/scenarios/templates")
+def api_scenario_templates():
+    return scenario_templates()
+
+
+@app.get("/api/scenarios/from-preset/{preset_id}")
+def api_scenario_from_preset(preset_id: str):
+    try:
+        return {"spec": scenario_from_preset(preset_id)}
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/scenarios/validate")
+def api_scenario_validate(body: SpecBody):
+    """Dry-run through the real ExperimentVersion machinery: returns the
+    exact research identity the spec would mint, or the exact failure."""
+    try:
+        return validate_spec(body.spec)
+    except ScenarioError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/scenarios")
+def api_scenarios_list():
+    return scenario_store.list()
+
+
+@app.post("/api/scenarios", status_code=201)
+def api_scenario_save(body: ScenarioBody):
+    try:
+        return scenario_store.save(body.name, body.spec)
+    except ScenarioError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/scenarios/{scenario_id}")
+def api_scenario_get(scenario_id: str):
+    try:
+        return scenario_store.get(scenario_id)
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.put("/api/scenarios/{scenario_id}")
+def api_scenario_update(scenario_id: str, body: ScenarioBody):
+    try:
+        scenario_store.get(scenario_id)
+        return scenario_store.save(body.name, body.spec, scenario_id=scenario_id)
+    except ScenarioError as exc:
+        code = 404 if "unknown scenario" in str(exc) else 422
+        raise HTTPException(code, str(exc)) from exc
+
+
+@app.delete("/api/scenarios/{scenario_id}")
+def api_scenario_delete(scenario_id: str):
+    try:
+        scenario_store.delete(scenario_id)
+        return {"deleted": scenario_id}
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/scenarios/{scenario_id}/duplicate", status_code=201)
+def api_scenario_duplicate(scenario_id: str):
+    try:
+        return scenario_store.duplicate(scenario_id)
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/scenarios/register", status_code=201)
+def api_scenario_register(body: SpecBody):
+    """Mint the immutable experiment from a spec (the canonical path —
+    identical to CLI registration; content-addressed and idempotent)."""
+    try:
+        version = version_from_spec(body.spec)
+    except Exception as exc:  # noqa: BLE001 — surface exact validation error
+        raise HTTPException(422, f"invalid experiment spec: {exc}") from exc
+    vid = research_registry.register(version)
+    return research_registry.get(vid)
+
+
+# ---------------------------------------------------------------------------
+# TradeOps (Phase S2): queue, workers, failures, retries, capacity
+# ---------------------------------------------------------------------------
+from tezcat.ops import OpsError, OpsLimits, OpsManager  # noqa: E402
+
+ops_manager = OpsManager(
+    research_registry,
+    limits=OpsLimits.from_env(),
+    workers=int(os.environ.get("TEZCAT_OPS_WORKERS", "2")),
+    chunk=int(os.environ.get("TEZCAT_OPS_CHUNK", "5")),
+    data_dir=os.environ.get("TEZCAT_DATA_DIR", "data"),
+)
+
+
+class OpsSubmitBody(BaseModel):
+    version_ref: str = Field(..., min_length=4)
+
+
+def _ops_error(exc: OpsError) -> HTTPException:
+    status = 409 if exc.code in ("duplicate_execution", "not_cancellable",
+                                 "not_retryable") else \
+             429 if exc.code.startswith("limit_") else 404
+    return HTTPException(status, {"error": str(exc), "code": exc.code,
+                                  "detail": exc.detail})
+
+
+@app.get("/api/ops/status")
+def api_ops_status():
+    return {**ops_manager.status(),
+            "data_dir": os.environ.get("TEZCAT_DATA_DIR", "data")}
+
+
+@app.get("/api/ops/workers")
+def api_ops_workers():
+    return ops_manager.workers()
+
+
+@app.get("/api/ops/jobs")
+def api_ops_jobs(state: Optional[str] = None):
+    return ops_manager.jobs(state=state.upper() if state else None)
+
+
+@app.get("/api/ops/jobs/{job_id}")
+def api_ops_job(job_id: str):
+    try:
+        return ops_manager.job(job_id)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+@app.post("/api/ops/jobs", status_code=202)
+def api_ops_submit(body: OpsSubmitBody):
+    vid = _resolve_version(body.version_ref)
+    try:
+        return ops_manager.submit(vid)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+@app.post("/api/ops/jobs/{job_id}/cancel")
+def api_ops_cancel(job_id: str):
+    try:
+        return ops_manager.cancel(job_id)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+@app.post("/api/ops/jobs/{job_id}/retry", status_code=202)
+def api_ops_retry(job_id: str):
+    try:
+        return ops_manager.retry(job_id)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Scenarios (Phase S2): mutable drafts → the canonical experiment path
+# ---------------------------------------------------------------------------
+from tezcat.experiments.scenarios import (  # noqa: E402
+    ScenarioError, ScenarioStore, scenario_from_preset, scenario_templates,
+    validate_spec, version_from_spec,
+)
+
+scenario_store = ScenarioStore(os.environ.get("TEZCAT_DATA_DIR", "data"))
+
+
+class ScenarioBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    spec: Dict[str, Any]
+
+
+class SpecBody(BaseModel):
+    spec: Dict[str, Any]
+
+
+@app.get("/api/scenarios/templates")
+def api_scenario_templates():
+    return scenario_templates()
+
+
+@app.get("/api/scenarios/from-preset/{preset_id}")
+def api_scenario_from_preset(preset_id: str):
+    try:
+        return {"spec": scenario_from_preset(preset_id)}
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/scenarios/validate")
+def api_scenario_validate(body: SpecBody):
+    """Dry-run through the real ExperimentVersion machinery: returns the
+    exact research identity the spec would mint, or the exact failure."""
+    try:
+        return validate_spec(body.spec)
+    except ScenarioError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/scenarios")
+def api_scenarios_list():
+    return scenario_store.list()
+
+
+@app.post("/api/scenarios", status_code=201)
+def api_scenario_save(body: ScenarioBody):
+    try:
+        return scenario_store.save(body.name, body.spec)
+    except ScenarioError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/scenarios/{scenario_id}")
+def api_scenario_get(scenario_id: str):
+    try:
+        return scenario_store.get(scenario_id)
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.put("/api/scenarios/{scenario_id}")
+def api_scenario_update(scenario_id: str, body: ScenarioBody):
+    try:
+        scenario_store.get(scenario_id)
+        return scenario_store.save(body.name, body.spec, scenario_id=scenario_id)
+    except ScenarioError as exc:
+        code = 404 if "unknown scenario" in str(exc) else 422
+        raise HTTPException(code, str(exc)) from exc
+
+
+@app.delete("/api/scenarios/{scenario_id}")
+def api_scenario_delete(scenario_id: str):
+    try:
+        scenario_store.delete(scenario_id)
+        return {"deleted": scenario_id}
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/scenarios/{scenario_id}/duplicate", status_code=201)
+def api_scenario_duplicate(scenario_id: str):
+    try:
+        return scenario_store.duplicate(scenario_id)
+    except ScenarioError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/scenarios/register", status_code=201)
+def api_scenario_register(body: SpecBody):
+    """Mint the immutable experiment from a spec (the canonical path —
+    identical to CLI registration; content-addressed and idempotent)."""
+    try:
+        version = version_from_spec(body.spec)
+    except Exception as exc:  # noqa: BLE001 — surface exact validation error
+        raise HTTPException(422, f"invalid experiment spec: {exc}") from exc
+    vid = research_registry.register(version)
+    return research_registry.get(vid)
+
+
+# ---------------------------------------------------------------------------
+# TradeOps (Phase S2): queue, workers, failures, retries, capacity
+# ---------------------------------------------------------------------------
+from tezcat.ops import OpsError, OpsLimits, OpsManager  # noqa: E402
+
+ops_manager = OpsManager(
+    research_registry,
+    limits=OpsLimits.from_env(),
+    workers=int(os.environ.get("TEZCAT_OPS_WORKERS", "2")),
+    chunk=int(os.environ.get("TEZCAT_OPS_CHUNK", "5")),
+    data_dir=os.environ.get("TEZCAT_DATA_DIR", "data"),
+)
+
+
+class OpsSubmitBody(BaseModel):
+    version_ref: str = Field(..., min_length=4)
+
+
+def _ops_error(exc: OpsError) -> HTTPException:
+    status = 409 if exc.code in ("duplicate_execution", "not_cancellable",
+                                 "not_retryable") else \
+             429 if exc.code.startswith("limit_") else 404
+    return HTTPException(status, {"error": str(exc), "code": exc.code,
+                                  "detail": exc.detail})
+
+
+@app.get("/api/ops/status")
+def api_ops_status():
+    return {**ops_manager.status(),
+            "data_dir": os.environ.get("TEZCAT_DATA_DIR", "data")}
+
+
+@app.get("/api/ops/workers")
+def api_ops_workers():
+    return ops_manager.workers()
+
+
+@app.get("/api/ops/jobs")
+def api_ops_jobs(state: Optional[str] = None):
+    return ops_manager.jobs(state=state.upper() if state else None)
+
+
+@app.get("/api/ops/jobs/{job_id}")
+def api_ops_job(job_id: str):
+    try:
+        return ops_manager.job(job_id)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+@app.post("/api/ops/jobs", status_code=202)
+def api_ops_submit(body: OpsSubmitBody):
+    vid = _resolve_version(body.version_ref)
+    try:
+        return ops_manager.submit(vid)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+@app.post("/api/ops/jobs/{job_id}/cancel")
+def api_ops_cancel(job_id: str):
+    try:
+        return ops_manager.cancel(job_id)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+@app.post("/api/ops/jobs/{job_id}/retry", status_code=202)
+def api_ops_retry(job_id: str):
+    try:
+        return ops_manager.retry(job_id)
+    except OpsError as exc:
+        raise _ops_error(exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# MARKETS (Phase S3): external event-market intelligence — read-only
+# ---------------------------------------------------------------------------
+from tezcat.api.markets import router as markets_router  # noqa: E402
+
 app.include_router(markets_router)
-
-
-@app.on_event("shutdown")
-def _close_external_market_service() -> None:
-    service = getattr(app.state, "external_market_service", None)
-    if service is not None:
-        service.close()
-
-
-# ---------------------------------------------------------------------------
-# Scenarios (Phase S2): mutable drafts → the canonical experiment path
-# ---------------------------------------------------------------------------
-from tezcat.experiments.scenarios import (  # noqa: E402
-    ScenarioError, ScenarioStore, scenario_from_preset, scenario_templates,
-    validate_spec, version_from_spec,
-)
-
-scenario_store = ScenarioStore(os.environ.get("TEZCAT_DATA_DIR", "data"))
-
-
-class ScenarioBody(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    spec: Dict[str, Any]
-
-
-class SpecBody(BaseModel):
-    spec: Dict[str, Any]
-
-
-@app.get("/api/scenarios/templates")
-def api_scenario_templates():
-    return scenario_templates()
-
-
-@app.get("/api/scenarios/from-preset/{preset_id}")
-def api_scenario_from_preset(preset_id: str):
-    try:
-        return {"spec": scenario_from_preset(preset_id)}
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/scenarios/validate")
-def api_scenario_validate(body: SpecBody):
-    """Dry-run through the real ExperimentVersion machinery: returns the
-    exact research identity the spec would mint, or the exact failure."""
-    try:
-        return validate_spec(body.spec)
-    except ScenarioError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@app.get("/api/scenarios")
-def api_scenarios_list():
-    return scenario_store.list()
-
-
-@app.post("/api/scenarios", status_code=201)
-def api_scenario_save(body: ScenarioBody):
-    try:
-        return scenario_store.save(body.name, body.spec)
-    except ScenarioError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@app.get("/api/scenarios/{scenario_id}")
-def api_scenario_get(scenario_id: str):
-    try:
-        return scenario_store.get(scenario_id)
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.put("/api/scenarios/{scenario_id}")
-def api_scenario_update(scenario_id: str, body: ScenarioBody):
-    try:
-        scenario_store.get(scenario_id)
-        return scenario_store.save(body.name, body.spec, scenario_id=scenario_id)
-    except ScenarioError as exc:
-        code = 404 if "unknown scenario" in str(exc) else 422
-        raise HTTPException(code, str(exc)) from exc
-
-
-@app.delete("/api/scenarios/{scenario_id}")
-def api_scenario_delete(scenario_id: str):
-    try:
-        scenario_store.delete(scenario_id)
-        return {"deleted": scenario_id}
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/scenarios/{scenario_id}/duplicate", status_code=201)
-def api_scenario_duplicate(scenario_id: str):
-    try:
-        return scenario_store.duplicate(scenario_id)
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/scenarios/register", status_code=201)
-def api_scenario_register(body: SpecBody):
-    """Mint the immutable experiment from a spec (the canonical path —
-    identical to CLI registration; content-addressed and idempotent)."""
-    try:
-        version = version_from_spec(body.spec)
-    except Exception as exc:  # noqa: BLE001 — surface exact validation error
-        raise HTTPException(422, f"invalid experiment spec: {exc}") from exc
-    vid = research_registry.register(version)
-    return research_registry.get(vid)
-
-
-# ---------------------------------------------------------------------------
-# TradeOps (Phase S2): queue, workers, failures, retries, capacity
-# ---------------------------------------------------------------------------
-from tezcat.ops import OpsError, OpsLimits, OpsManager  # noqa: E402
-
-ops_manager = OpsManager(
-    research_registry,
-    limits=OpsLimits.from_env(),
-    workers=int(os.environ.get("TEZCAT_OPS_WORKERS", "2")),
-    chunk=int(os.environ.get("TEZCAT_OPS_CHUNK", "5")),
-    data_dir=os.environ.get("TEZCAT_DATA_DIR", "data"),
-)
-
-
-class OpsSubmitBody(BaseModel):
-    version_ref: str = Field(..., min_length=4)
-
-
-def _ops_error(exc: OpsError) -> HTTPException:
-    status = 409 if exc.code in ("duplicate_execution", "not_cancellable",
-                                 "not_retryable") else \
-             429 if exc.code.startswith("limit_") else 404
-    return HTTPException(status, {"error": str(exc), "code": exc.code,
-                                  "detail": exc.detail})
-
-
-@app.get("/api/ops/status")
-def api_ops_status():
-    return {**ops_manager.status(),
-            "data_dir": os.environ.get("TEZCAT_DATA_DIR", "data")}
-
-
-@app.get("/api/ops/workers")
-def api_ops_workers():
-    return ops_manager.workers()
-
-
-@app.get("/api/ops/jobs")
-def api_ops_jobs(state: Optional[str] = None):
-    return ops_manager.jobs(state=state.upper() if state else None)
-
-
-@app.get("/api/ops/jobs/{job_id}")
-def api_ops_job(job_id: str):
-    try:
-        return ops_manager.job(job_id)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-@app.post("/api/ops/jobs", status_code=202)
-def api_ops_submit(body: OpsSubmitBody):
-    vid = _resolve_version(body.version_ref)
-    try:
-        return ops_manager.submit(vid)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-@app.post("/api/ops/jobs/{job_id}/cancel")
-def api_ops_cancel(job_id: str):
-    try:
-        return ops_manager.cancel(job_id)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-@app.post("/api/ops/jobs/{job_id}/retry", status_code=202)
-def api_ops_retry(job_id: str):
-    try:
-        return ops_manager.retry(job_id)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-# ---------------------------------------------------------------------------
-# Scenarios (Phase S2): mutable drafts → the canonical experiment path
-# ---------------------------------------------------------------------------
-from tezcat.experiments.scenarios import (  # noqa: E402
-    ScenarioError, ScenarioStore, scenario_from_preset, scenario_templates,
-    validate_spec, version_from_spec,
-)
-
-scenario_store = ScenarioStore(os.environ.get("TEZCAT_DATA_DIR", "data"))
-
-
-class ScenarioBody(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    spec: Dict[str, Any]
-
-
-class SpecBody(BaseModel):
-    spec: Dict[str, Any]
-
-
-@app.get("/api/scenarios/templates")
-def api_scenario_templates():
-    return scenario_templates()
-
-
-@app.get("/api/scenarios/from-preset/{preset_id}")
-def api_scenario_from_preset(preset_id: str):
-    try:
-        return {"spec": scenario_from_preset(preset_id)}
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/scenarios/validate")
-def api_scenario_validate(body: SpecBody):
-    """Dry-run through the real ExperimentVersion machinery: returns the
-    exact research identity the spec would mint, or the exact failure."""
-    try:
-        return validate_spec(body.spec)
-    except ScenarioError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@app.get("/api/scenarios")
-def api_scenarios_list():
-    return scenario_store.list()
-
-
-@app.post("/api/scenarios", status_code=201)
-def api_scenario_save(body: ScenarioBody):
-    try:
-        return scenario_store.save(body.name, body.spec)
-    except ScenarioError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@app.get("/api/scenarios/{scenario_id}")
-def api_scenario_get(scenario_id: str):
-    try:
-        return scenario_store.get(scenario_id)
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.put("/api/scenarios/{scenario_id}")
-def api_scenario_update(scenario_id: str, body: ScenarioBody):
-    try:
-        scenario_store.get(scenario_id)
-        return scenario_store.save(body.name, body.spec, scenario_id=scenario_id)
-    except ScenarioError as exc:
-        code = 404 if "unknown scenario" in str(exc) else 422
-        raise HTTPException(code, str(exc)) from exc
-
-
-@app.delete("/api/scenarios/{scenario_id}")
-def api_scenario_delete(scenario_id: str):
-    try:
-        scenario_store.delete(scenario_id)
-        return {"deleted": scenario_id}
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/scenarios/{scenario_id}/duplicate", status_code=201)
-def api_scenario_duplicate(scenario_id: str):
-    try:
-        return scenario_store.duplicate(scenario_id)
-    except ScenarioError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-@app.post("/api/scenarios/register", status_code=201)
-def api_scenario_register(body: SpecBody):
-    """Mint the immutable experiment from a spec (the canonical path —
-    identical to CLI registration; content-addressed and idempotent)."""
-    try:
-        version = version_from_spec(body.spec)
-    except Exception as exc:  # noqa: BLE001 — surface exact validation error
-        raise HTTPException(422, f"invalid experiment spec: {exc}") from exc
-    vid = research_registry.register(version)
-    return research_registry.get(vid)
-
-
-# ---------------------------------------------------------------------------
-# TradeOps (Phase S2): queue, workers, failures, retries, capacity
-# ---------------------------------------------------------------------------
-from tezcat.ops import OpsError, OpsLimits, OpsManager  # noqa: E402
-
-ops_manager = OpsManager(
-    research_registry,
-    limits=OpsLimits.from_env(),
-    workers=int(os.environ.get("TEZCAT_OPS_WORKERS", "2")),
-    chunk=int(os.environ.get("TEZCAT_OPS_CHUNK", "5")),
-    data_dir=os.environ.get("TEZCAT_DATA_DIR", "data"),
-)
-
-
-class OpsSubmitBody(BaseModel):
-    version_ref: str = Field(..., min_length=4)
-
-
-def _ops_error(exc: OpsError) -> HTTPException:
-    status = 409 if exc.code in ("duplicate_execution", "not_cancellable",
-                                 "not_retryable") else \
-             429 if exc.code.startswith("limit_") else 404
-    return HTTPException(status, {"error": str(exc), "code": exc.code,
-                                  "detail": exc.detail})
-
-
-@app.get("/api/ops/status")
-def api_ops_status():
-    return {**ops_manager.status(),
-            "data_dir": os.environ.get("TEZCAT_DATA_DIR", "data")}
-
-
-@app.get("/api/ops/workers")
-def api_ops_workers():
-    return ops_manager.workers()
-
-
-@app.get("/api/ops/jobs")
-def api_ops_jobs(state: Optional[str] = None):
-    return ops_manager.jobs(state=state.upper() if state else None)
-
-
-@app.get("/api/ops/jobs/{job_id}")
-def api_ops_job(job_id: str):
-    try:
-        return ops_manager.job(job_id)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-@app.post("/api/ops/jobs", status_code=202)
-def api_ops_submit(body: OpsSubmitBody):
-    vid = _resolve_version(body.version_ref)
-    try:
-        return ops_manager.submit(vid)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-@app.post("/api/ops/jobs/{job_id}/cancel")
-def api_ops_cancel(job_id: str):
-    try:
-        return ops_manager.cancel(job_id)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
-
-
-@app.post("/api/ops/jobs/{job_id}/retry", status_code=202)
-def api_ops_retry(job_id: str):
-    try:
-        return ops_manager.retry(job_id)
-    except OpsError as exc:
-        raise _ops_error(exc) from exc
 
 
 # ---------------------------------------------------------------------------
