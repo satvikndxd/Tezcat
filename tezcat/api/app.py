@@ -939,6 +939,14 @@ app.include_router(markets_router)
 
 
 # ---------------------------------------------------------------------------
+# STRATEGY LAB (Phase S4): market worlds × Nautilus backtests — research only
+# ---------------------------------------------------------------------------
+from tezcat.api.lab import router as lab_router  # noqa: E402
+
+app.include_router(lab_router)
+
+
+# ---------------------------------------------------------------------------
 # Static dashboard (built React app) — mounted last so /api wins.
 # ---------------------------------------------------------------------------
 _dist = Path(os.environ.get("TEZCAT_FRONTEND_DIST",

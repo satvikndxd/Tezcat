@@ -171,6 +171,19 @@ export const api = {
   marketsResearch: (body) => apiPost('/markets/research', body),
   marketsCompare: (body) => apiPost('/markets/compare', body),
   marketsImport: (body) => apiPost('/markets/import', body),
+
+  // Strategy Lab (Phase S4): market worlds × Nautilus backtests
+  labStrategies: () => apiGet('/lab/strategies'),
+  labWorlds: () => apiGet('/lab/worlds'),
+  labWorld: (id) => apiGet(`/lab/worlds/${encodeURIComponent(id)}`),
+  labWorldQuotes: (id, start = 0, limit = 5000) =>
+    apiGet(`/lab/worlds/${encodeURIComponent(id)}/quotes?start=${start}&limit=${limit}`),
+  labBuildWorld: (body) => apiPost('/lab/worlds', body),
+  labRunBacktest: (body) => apiPost('/lab/backtests', body),
+  labResults: () => apiGet('/lab/results'),
+  labResult: (id) => apiGet(`/lab/results/${encodeURIComponent(id)}`),
+  labCompare: (resultIds) => apiPost('/lab/results/compare', { result_ids: resultIds }),
+  labReproduce: (id) => apiPost(`/lab/results/${encodeURIComponent(id)}/reproduce`),
 };
 
 // ---- small formatting helpers shared by pages ----------------------------

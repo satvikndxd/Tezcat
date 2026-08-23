@@ -14,6 +14,12 @@ intelligence — read-only ingestion that feeds the same five-verb loop:
     tezcat markets providers | datasets | import | show | signature |
                    propose | research | compare
 
+And two groups (Phase S4) for the NautilusTrader Strategy Lab bridge —
+deterministic market worlds and strategy backtests against them:
+
+    tezcat worlds build | list | show | export
+    tezcat lab strategies | run | results | show | compare | reproduce
+
 ``<ref>`` is a version id (``expv_…``), a full research hash, or an
 unambiguous hash prefix (≥8 chars). The data directory defaults to
 ``$TEZCAT_DATA_DIR`` or ``./data``; override with ``--data-dir``.
@@ -392,6 +398,271 @@ def cmd_markets_compare(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Worlds + Strategy Lab verb groups (Phase S4): the Nautilus bridge
+# ---------------------------------------------------------------------------
+def cmd_worlds_build(args) -> int:
+    from tezcat.worlds import WorldError, WorldStore, build_world
+    registry = _registry(args)
+    try:
+        world = build_world(registry, args.ref, cell=args.cell,
+                            replication=args.replication)
+    except (WorldError, Exception) as exc:  # noqa: BLE001 — exact reason
+        print(f"{BAD} world build failed: {exc}", file=sys.stderr)
+        return 1
+    WorldStore(_data_dir(args)).save(world)
+    fp = world.fingerprint()
+    print(f"{OK} market world built (deterministic, immutable)")
+    print(f"  world:       {world.world_id}")
+    print(f"  world hash:  {world.world_hash}")
+    print(f"  from:        {world.manifest['version_id']} · "
+          f"cell {world.manifest['cell']} · rep {world.manifest['replication']} "
+          f"· seed {world.manifest['seed']}")
+    print(f"  stream:      {world.manifest['n_quotes']} quotes, "
+          f"{world.manifest['n_trades']} trades "
+          f"({world.manifest['n_quote_gaps']} quote gaps)")
+    print(f"  fingerprint: spread {_f(fp.mean_relative_spread, 5)} · "
+          f"vol {_f(fp.return_volatility, 5)} · "
+          f"crash {'yes' if fp.crash_detected else 'no'} · "
+          f"regimes {fp.regime_occupancy}")
+    print(f"\nnext: tezcat lab run {world.world_id} --strategy ema_cross")
+    return 0
+
+
+def cmd_worlds_list(args) -> int:
+    from tezcat.worlds import WorldStore
+    rows = WorldStore(_data_dir(args)).list()
+    if not rows:
+        print("no market worlds (try: tezcat worlds build <experiment-ref>)")
+        return 0
+    print(f"{'world':<18} {'version':<18} {'cell':<20} {'rep':>3} "
+          f"{'quotes':>6} {'trades':>7} crash")
+    for r in rows:
+        print(f"{r['world_id']:<18} {r['version_id']:<18} {r['cell']:<20} "
+              f"{r['replication']:>3} {r['n_quotes']:>6} {r['n_trades']:>7} "
+              f"{'yes' if r['crash_detected'] else 'no'}")
+    return 0
+
+
+def cmd_worlds_show(args) -> int:
+    from tezcat.worlds import WorldError, WorldStore
+    try:
+        world = WorldStore(_data_dir(args)).load(args.world_id)
+    except WorldError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    print(f"[SYNTHETIC TEZCAT MARKET WORLD] {world.world_id}")
+    for k in ("world_hash", "research_hash", "version_id", "cell",
+              "replication", "seed", "config_hash", "state_hash",
+              "event_hash", "n_quotes", "n_trades", "n_quote_gaps"):
+        print(f"  {k}: {world.manifest[k]}")
+    print("  fingerprint:")
+    for k, v in world.manifest["fingerprint"].items():
+        print(f"    {k}: {v}")
+    return 0
+
+
+def cmd_worlds_export(args) -> int:
+    from tezcat.lab.nautilus_export import export_stream_rows
+    from tezcat.worlds import WorldError, WorldStore
+    if args.target != "nautilus":
+        print(f"{BAD} unknown export target {args.target!r}", file=sys.stderr)
+        return 1
+    try:
+        world = WorldStore(_data_dir(args)).load(args.world_id)
+        rows = export_stream_rows(world)
+    except (WorldError, ValueError) as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    out = Path(args.output or f"{world.world_id}_stream.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(rows, indent=1))
+    print(f"{OK} canonical market stream written to {out}")
+    print(f"  {len(rows['quotes'])} quotes · {len(rows['trades'])} trades · "
+          f"annotations: regimes+shocks")
+    print("  (loads into the Nautilus bridge via tezcat.lab.nautilus_export)")
+    return 0
+
+
+def cmd_lab_strategies(args) -> int:
+    from tezcat.lab.strategies import list_strategies
+    for s in list_strategies():
+        print(f"{s['strategy_id']:<16} {s['description']}")
+        print(f"{'':<16} defaults: {s['default_params']}")
+    return 0
+
+
+def cmd_lab_run(args) -> int:
+    from tezcat.lab.backtest import run_backtest
+    from tezcat.lab.results import LabResultStore
+    from tezcat.lab.strategies import LabError
+    from tezcat.worlds import WorldError, WorldStore
+    params = {}
+    for pair in args.param or []:
+        if "=" not in pair:
+            print(f"{BAD} --param expects k=v, got {pair!r}", file=sys.stderr)
+            return 1
+        k, v = pair.split("=", 1)
+        params[k] = v
+    store = WorldStore(_data_dir(args))
+    results = LabResultStore(_data_dir(args))
+    rids = []
+    for world_id in args.world_ids:
+        try:
+            world = store.load(world_id)
+            result = run_backtest(world, args.strategy, params,
+                                  starting_cash=args.cash)
+        except (WorldError, LabError, ValueError) as exc:
+            print(f"{BAD} {exc}", file=sys.stderr)
+            return 1
+        rid = results.save(result)
+        rids.append(rid)
+        m = result["metrics"]
+        print(f"{OK} {rid}  world {world_id}  [{args.strategy}]")
+        print(f"   return {_f(m['total_return'], 5)} · "
+              f"drawdown {_f(m['max_drawdown'], 5)} · "
+              f"fills {m['n_fills']}/{m['n_orders_submitted']} · "
+              f"slippage {_f(m['mean_slippage_vs_mid'], 4)}")
+        for regime, row in m["regime_breakdown"].items():
+            print(f"   {regime:<10} pnl {_f(row['pnl'], 2)} · "
+                  f"fills {row['n_fills']} · "
+                  f"slip {_f(row['mean_slippage_vs_mid'], 4)}")
+    if len(rids) > 1:
+        print(f"\nnext: tezcat lab compare {' '.join(rids)}")
+    else:
+        print(f"\nnext: tezcat lab reproduce {rids[0]}")
+    return 0
+
+
+def cmd_lab_results(args) -> int:
+    from tezcat.lab.results import LabResultStore
+    rows = LabResultStore(_data_dir(args)).list()
+    if not rows:
+        print("no lab results (try: tezcat lab run <world> --strategy ema_cross)")
+        return 0
+    print(f"{'result':<18} {'world':<18} {'cell':<20} {'strategy':<16} "
+          f"{'return':>9} {'drawdown':>9} {'fills':>6}")
+    for r in rows:
+        print(f"{r['result_id']:<18} {r['world_id']:<18} {r['cell']:<20} "
+              f"{r['strategy_id']:<16} {_f(r['total_return'], 5):>9} "
+              f"{_f(r['max_drawdown'], 5):>9} {r['n_fills']:>6}")
+    return 0
+
+
+def cmd_lab_show(args) -> int:
+    from tezcat.lab.results import LabResultStore
+    from tezcat.lab.strategies import LabError
+    try:
+        r = LabResultStore(_data_dir(args)).get(args.result_id)
+    except LabError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(r, indent=1))
+    return 0
+
+
+def cmd_lab_compare(args) -> int:
+    from tezcat.lab.results import LabResultStore
+    from tezcat.lab.strategies import LabError
+    try:
+        comparison = LabResultStore(_data_dir(args)).compare(args.result_ids)
+    except LabError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    print(f"comparison mode: {comparison['mode']}")
+    print(f"{'result':<18} {'world':<18} {'cell':<20} {'strategy':<16} "
+          f"{'return':>9} {'drawdown':>9} {'fill%':>6} {'slip':>8}")
+    for row in comparison["rows"]:
+        fr = row["fill_rate"]
+        print(f"{row['result_id']:<18} {row['world_id']:<18} "
+              f"{row['cell']:<20} {row['strategy_id']:<16} "
+              f"{_f(row['total_return'], 5):>9} "
+              f"{_f(row['max_drawdown'], 5):>9} "
+              f"{_f(fr * 100 if fr is not None else None, 1):>6} "
+              f"{_f(row['mean_slippage_vs_mid'], 4):>8}")
+        print(f"{'':<18} regime pnl: {row['regime_pnl']}")
+    print(f"\n{comparison['note']}")
+    return 0
+
+
+def cmd_lab_reproduce(args) -> int:
+    from tezcat.lab.results import LabResultStore, reproduce_result
+    from tezcat.lab.strategies import LabError
+    from tezcat.worlds import WorldStore
+    try:
+        rep = reproduce_result(_registry(args), WorldStore(_data_dir(args)),
+                               LabResultStore(_data_dir(args)),
+                               args.result_id)
+    except (LabError, Exception) as exc:  # noqa: BLE001 — exact reason
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    for c in rep["checks"]:
+        mark = OK if c["ok"] else BAD
+        print(f"{mark} {c['check']}" + (f"  ({c['detail']})" if c["detail"] else ""))
+    if rep["success"]:
+        print(f"\n{OK} LAB REPRODUCTION SUCCESSFUL — full chain verified")
+        return 0
+    print(f"\n{BAD} LAB REPRODUCTION FAILED", file=sys.stderr)
+    return 1
+
+
+def _add_worlds_parser(sub) -> None:
+    wd = sub.add_parser("worlds", help="deterministic market worlds "
+                                       "(Nautilus bridge input)")
+    wsub = wd.add_subparsers(dest="worlds_command", required=True)
+
+    b = wsub.add_parser("build", help="realize one experiment cell as a world")
+    b.add_argument("ref", help="experiment version id / research hash prefix")
+    b.add_argument("--cell", default=None, help="design cell (default: first)")
+    b.add_argument("--replication", type=int, default=0)
+    b.set_defaults(func=cmd_worlds_build)
+
+    ls = wsub.add_parser("list", help="list stored worlds")
+    ls.set_defaults(func=cmd_worlds_list)
+
+    sh = wsub.add_parser("show", help="world manifest + ecology fingerprint")
+    sh.add_argument("world_id")
+    sh.set_defaults(func=cmd_worlds_show)
+
+    ex = wsub.add_parser("export", help="write the canonical market stream")
+    ex.add_argument("world_id")
+    ex.add_argument("--target", default="nautilus")
+    ex.add_argument("-o", "--output", default=None)
+    ex.set_defaults(func=cmd_worlds_export)
+
+
+def _add_lab_parser(sub) -> None:
+    lab = sub.add_parser("lab", help="Strategy Lab: Nautilus backtests "
+                                     "against Tezcat worlds")
+    lsub = lab.add_subparsers(dest="lab_command", required=True)
+
+    st = lsub.add_parser("strategies", help="reference strategy library")
+    st.set_defaults(func=cmd_lab_strategies)
+
+    run = lsub.add_parser("run", help="run one strategy against world(s)")
+    run.add_argument("world_ids", nargs="+")
+    run.add_argument("--strategy", required=True)
+    run.add_argument("--param", action="append", default=None,
+                     help="k=v strategy parameter (repeatable)")
+    run.add_argument("--cash", type=float, default=1_000_000.0)
+    run.set_defaults(func=cmd_lab_run)
+
+    rs = lsub.add_parser("results", help="list lab results")
+    rs.set_defaults(func=cmd_lab_results)
+
+    sh = lsub.add_parser("show", help="full result artifact (JSON)")
+    sh.add_argument("result_id")
+    sh.set_defaults(func=cmd_lab_show)
+
+    cp = lsub.add_parser("compare", help="side-by-side result comparison")
+    cp.add_argument("result_ids", nargs="+")
+    cp.set_defaults(func=cmd_lab_compare)
+
+    rp = lsub.add_parser("reproduce", help="re-run the full chain and verify")
+    rp.add_argument("result_id")
+    rp.set_defaults(func=cmd_lab_reproduce)
+
+
 def _add_markets_parser(sub) -> None:
     mk = sub.add_parser("markets",
                         help="external event-market intelligence (read-only)")
@@ -502,6 +773,8 @@ def build_parser() -> argparse.ArgumentParser:
     ls.set_defaults(func=cmd_list)
 
     _add_markets_parser(sub)
+    _add_worlds_parser(sub)
+    _add_lab_parser(sub)
     return p
 
 
