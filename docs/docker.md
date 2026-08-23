@@ -72,8 +72,9 @@ orchestrator would need; nothing in the research kernel would change.
 
 ## What is deliberately absent
 
-- No Polymarket/Kalshi or any external market-data integration (planned
-  separately; the F9 file-provider boundary is the extension point).
+- No live external-provider scraping in containers by default: the S3
+  Kalshi/Polymarket layer ([docs/markets.md](markets.md)) is offline-first
+  and requires an explicit server-side `TEZCAT_EXTERNAL_LIVE=1` opt-in.
 - No multi-machine distributed execution (single-machine TradeOps workers
   \+ `--workers N` process pools exist; remote workers would build on the
   same content-addressed resumability).
