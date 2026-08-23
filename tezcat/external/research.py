@@ -1,163 +1,418 @@
-"""Research-only transformations over normalized external observations."""
+"""Observed event → synthetic experiment bridge (Phase S3-D).
+
+The workflow this module implements::
+
+    External observation → EventSignature → mechanism proposal
+        → ordinary ExperimentVersion → BatchRunner → comparison
+        → research manifest (experiment hash + dataset hash)
+
+Architectural rule (mandatory): external data enters **experiment design
+and calibration targets only** — never the simulation kernel. The synthetic
+market remains synthetic; nothing here feeds an observed probability into
+the price engine.
+
+Language rules (mandatory): mechanism proposals are **candidates**, worded
+as hypotheses to test. Comparison output says "consistent with" /
+"reproduces" / "does not reproduce" — never that a mechanism *caused* the
+real-world move. A synthetic run is a *synthetic analogue*, and the
+comparison layer only uses **dimensionless episode descriptors** computed
+identically on both sides (see :func:`dynamics_features`) — comparing a
+bounded probability against a synthetic price level directly would be a
+category error, so it is not offered.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import math
-import re
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Dict, List, Optional, Sequence
 
-from tezcat.external.schemas import (
-    Event, EventMatch, EventSignature, OrderbookSnapshot, Quote, Trade,
-    checksum, normalize_timestamp, signature_identity, utc_now,
+from tezcat.analysis.stats import describe
+from tezcat.analysis.stylized_facts import acf
+from tezcat.core.config import (
+    AgentGroupConfig, AgentType, ExperimentConfig, MarketConfig,
+    ShockConfig, ShockTrigger, ShockType, canonical_json,
 )
+from tezcat.experiments.schema import Arm, DesignSpec, ExperimentVersion
+from tezcat.external.datasets import DatasetManifest
+from tezcat.external.signature import EventSignature
+
+BRIDGE_VERSION = 1
 
 
-_T = TypeVar("_T")
-_STOPWORDS = {"will", "the", "a", "an", "of", "to", "in", "on", "for", "before", "after", "by"}
+class BridgeError(ValueError):
+    pass
 
 
-def _tokens(text: str) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9]+", text.lower()) if token not in _STOPWORDS}
+# ---------------------------------------------------------------------------
+# Mechanism templates (explicit — no LLM invention)
+# ---------------------------------------------------------------------------
+# Agent order in bridge_base_config is FIXED and load-bearing for the
+# override paths below: 0 noise, 1 retail, 2 momentum, 3 mean-reversion,
+# 4 market maker. Shock index 0 is the information shock.
+MECHANISMS: Dict[str, Dict[str, Any]] = {
+    "information_shock": {
+        "description": "Exogenous information arrival modeled as a whale "
+                       "order program at the event step.",
+        "overrides": {"shocks.0.magnitude": 900.0},
+        "signature_cue": "large delta_probability or max_jump",
+    },
+    "herding": {
+        "description": "Retail imitation strength amplifies moves once "
+                       "they start.",
+        "overrides": {"agents.1.params.herding": 0.9},
+        "signature_cue": "rising activity (volume_change > 1.5) during the move",
+    },
+    "momentum_amplification": {
+        "description": "Trend followers activate on smaller price changes, "
+                       "adding flow in the direction of the move.",
+        "overrides": {"agents.2.params.threshold": 0.0008},
+        "signature_cue": "volatility clustering in the observed increments",
+    },
+    "mm_withdrawal": {
+        "description": "Market makers pull quotes at the event, thinning "
+                       "the book while flow arrives.",
+        "overrides": {"shocks.1.enabled": True},
+        "signature_cue": "spread expansion (spread_change > 0)",
+    },
+    "thin_liquidity": {
+        "description": "Structurally smaller market-maker quotes: the same "
+                       "flow moves the price further.",
+        "overrides": {"agents.4.params.quote_size": 6},
+        "signature_cue": "depth loss (depth_change < 0)",
+    },
+}
 
 
-def match_events(event_a: Event, event_b: Event, *, origin: str = "algorithmic") -> EventMatch:
-    """Create a cautious research-only equivalence record.
+def bridge_base_config(*, t0_step: int = 400, total_steps: int = 1200,
+                       shock_side: str = "sell") -> ExperimentConfig:
+    """Base synthetic ecology for observed-event experiments.
 
-    This function never claims economic equivalence from a small text overlap;
-    it records the level and rationale so a researcher can confirm/reject it.
+    Agent group order is part of this module's contract (see MECHANISMS).
+    The information shock at ``t0_step`` is the synthetic analogue of the
+    observed event anchor; the MM-withdrawal shock exists but is disabled
+    in the base config, so `shocks.1.enabled` can switch the mechanism on.
     """
-    a = _tokens(event_a.title + " " + (event_a.description or ""))
-    b = _tokens(event_b.title + " " + (event_b.description or ""))
-    union = a | b
-    overlap = len(a & b) / len(union) if union else 0.0
-    same_title = event_a.title.strip().casefold() == event_b.title.strip().casefold()
-    if event_a.provider == event_b.provider and event_a.event_id == event_b.event_id:
-        level, confidence, rationale = "EXACT", 1.0, "same provider and event identifier"
-    elif same_title and (event_a.category or "") == (event_b.category or ""):
-        level, confidence, rationale = "EXACT", 0.98, "identical title and matching category"
-    elif overlap >= 0.78:
-        level, confidence, rationale = "LIKELY_EQUIVALENT", round(min(0.95, overlap), 4), f"token overlap={overlap:.3f}; review resolution rules and expiry"
-    elif overlap >= 0.45:
-        level, confidence, rationale = "POSSIBLY_RELATED", round(overlap, 4), f"partial token overlap={overlap:.3f}; wording alone cannot establish equivalence"
-    else:
-        level, confidence, rationale = "UNMATCHED", round(overlap, 4), f"insufficient title overlap={overlap:.3f}"
-    return EventMatch(
-        match_id=f"match_{checksum({'a': event_a.provider + ':' + event_a.event_id, 'b': event_b.provider + ':' + event_b.event_id})[:16]}",
-        event_a={"provider": event_a.provider, "event_id": event_a.event_id},
-        event_b={"provider": event_b.provider, "event_id": event_b.event_id},
-        level=level, confidence=confidence, rationale=rationale,
-        origin="human" if origin == "human" else "algorithmic", created_at=utc_now(),
+    if not 0 < t0_step < total_steps:
+        raise BridgeError(f"t0_step {t0_step} must lie inside (0, {total_steps})")
+    return ExperimentConfig(
+        market=MarketConfig(),
+        total_steps=total_steps,
+        step_delay_ms=0,
+        agents=[
+            AgentGroupConfig(agent_type=AgentType.NOISE_TRADER, count=18,
+                             cash=10_000, inventory=100,
+                             trading_frequency=0.5, risk_tolerance=0.5),
+            AgentGroupConfig(agent_type=AgentType.RETAIL_TRADER, count=12,
+                             cash=8_000, inventory=90, trading_frequency=0.45,
+                             risk_tolerance=0.5, params={"herding": 0.5}),
+            AgentGroupConfig(agent_type=AgentType.MOMENTUM_TRADER, count=6,
+                             cash=15_000, inventory=120,
+                             trading_frequency=0.5, risk_tolerance=0.55,
+                             params={"threshold": 0.0015}),
+            AgentGroupConfig(agent_type=AgentType.MEAN_REVERSION_TRADER,
+                             count=6, cash=15_000, inventory=120,
+                             trading_frequency=0.5, risk_tolerance=0.55,
+                             params={"band": 0.01}),
+            AgentGroupConfig(agent_type=AgentType.MARKET_MAKER, count=4,
+                             cash=50_000, inventory=500, trading_frequency=1.0,
+                             risk_tolerance=0.7,
+                             params={"half_spread": 2.0, "quote_size": 12}),
+        ],
+        shocks=[
+            ShockConfig(shock_id="info_shock",
+                        shock_type=ShockType.WHALE_ORDER,
+                        trigger=ShockTrigger(kind="scheduled", step=t0_step),
+                        side=shock_side, magnitude=600.0, duration=8,
+                        description="Synthetic analogue of the observed "
+                                    "information arrival"),
+            ShockConfig(shock_id="mm_withdrawal",
+                        shock_type=ShockType.MM_WITHDRAWAL,
+                        trigger=ShockTrigger(kind="scheduled", step=t0_step),
+                        magnitude=0.8, duration=60, enabled=False,
+                        description="Optional mechanism: quote withdrawal "
+                                    "at the event"),
+        ],
     )
 
 
-def probability_divergence(probability_a: float, probability_b: float) -> Dict[str, Any]:
-    """Return descriptive divergence; never labels it arbitrage or causality."""
-    signed = float(probability_b) - float(probability_a)
-    return {
-        "label": "cross-provider probability divergence",
-        "provider_a_probability": float(probability_a),
-        "provider_b_probability": float(probability_b),
-        "signed_difference": signed,
-        "absolute_difference": abs(signed),
-        "units": "probability points",
-        "interpretation": "descriptive difference; contractual equivalence and causality are not established",
-    }
+# ---------------------------------------------------------------------------
+# Mechanism proposal (rule-based, hypotheses only)
+# ---------------------------------------------------------------------------
+def propose_mechanisms(signature: EventSignature) -> Dict[str, Any]:
+    """Structured experiment proposal from an observed signature.
 
-
-def _window_filter(rows: Sequence[_T], timestamp_fn, start: Optional[str], end: Optional[str]) -> List[_T]:
-    if not start and not end:
-        return list(rows)
-    start_dt = datetime.fromisoformat(normalize_timestamp(start).replace("Z", "+00:00")) if start else None
-    end_dt = datetime.fromisoformat(normalize_timestamp(end).replace("Z", "+00:00")) if end else None
-    out: List[T] = []
-    for row in rows:
-        dt = datetime.fromisoformat(normalize_timestamp(timestamp_fn(row)).replace("Z", "+00:00"))
-        if start_dt and dt < start_dt:
-            continue
-        if end_dt and dt > end_dt:
-            continue
-        out.append(row)
-    return out
-
-
-def extract_event_signature(*, provider: str, dataset_id: str, market_id: str,
-                            quotes: Sequence[Quote] = (),
-                            trades: Sequence[Trade] = (),
-                            books: Sequence[OrderbookSnapshot] = (),
-                            window: Optional[Dict[str, str]] = None) -> EventSignature:
-    """Extract a conservative event signature from normalized observations.
-
-    Missing provider fields remain null. Probability features use raw bounded
-    probability deltas; no logit or return transform is silently applied.
+    Every candidate is worded as a hypothesis; the proposal never asserts
+    that a mechanism produced the observed move.
     """
-    window = dict(window or {})
-    quotes = _window_filter(quotes, lambda row: row.timestamp, window.get("start"), window.get("end"))
-    trades = _window_filter(trades, lambda row: row.timestamp, window.get("start"), window.get("end"))
-    books = _window_filter(books, lambda row: row.timestamp, window.get("start"), window.get("end"))
-    probs = [row.implied_probability if row.implied_probability is not None else row.mid for row in quotes]
-    probs = [float(value) for value in probs if value is not None]
-    pre = probs[0] if probs else None
-    post = probs[-1] if probs else None
-    peak = max(probs) if probs else None
-    delta = (post - pre) if pre is not None and post is not None else None
-    changes = [probs[i] - probs[i - 1] for i in range(1, len(probs))]
-    if len(changes) > 1:
-        mean = sum(changes) / len(changes)
-        volatility = math.sqrt(sum((value - mean) ** 2 for value in changes) / (len(changes) - 1))
-    else:
-        volatility = None
-    jumps = [abs(value) for value in changes if abs(value) >= 0.05]
-    spreads = [row.spread for row in quotes if row.spread is not None]
-    depths = [row.depth for row in books if row.depth is not None]
-    volumes = [row.quantity for row in trades]
-    payload: Dict[str, Any] = {
-        "provider": provider, "dataset_id": dataset_id, "market_id": market_id,
-        "window": window, "pre_event_probability": pre, "post_event_probability": post,
-        "delta_probability": delta, "peak_probability": peak,
-        "probability_volatility": volatility, "jump_frequency": (len(jumps) / len(changes) if changes else None),
-        "pre_event_spread": spreads[0] if spreads else None,
-        "post_event_spread": spreads[-1] if spreads else None,
-        "volume_change": (volumes[-1] / volumes[0] if volumes and volumes[0] else None),
-        "depth_change": (depths[-1] / depths[0] - 1.0 if depths and depths[0] else None),
-        "activity_intensity": (len(trades) / max(1, len(quotes))),
-        "transform": "raw_probability_delta",
-    }
-    sig_id = signature_identity(payload)
-    return EventSignature(
-        signature_id=sig_id, checksum=checksum(payload), provider=provider,
-        dataset_id=dataset_id, market_id=market_id, window=window,
-        pre_event_probability=pre, post_event_probability=post,
-        delta_probability=delta, peak_probability=peak,
-        probability_volatility=volatility,
-        jump_frequency=payload["jump_frequency"],
-        pre_event_spread=payload["pre_event_spread"],
-        post_event_spread=payload["post_event_spread"],
-        volume_change=payload["volume_change"], depth_change=payload["depth_change"],
-        activity_intensity=payload["activity_intensity"],
-        metadata={"data_class": "INFERRED", "source_observations": {"quotes": len(quotes), "trades": len(trades), "books": len(books)}},
-    )
+    candidates: List[Dict[str, str]] = []
 
+    def add(name: str, why: str) -> None:
+        candidates.append({"mechanism": name,
+                           "rationale": f"observed {why} — consistent with "
+                                        f"{name.replace('_', ' ')} as a "
+                                        "candidate mechanism (hypothesis, "
+                                        "not an explanation)"})
 
-def compare_signatures(observed: EventSignature, synthetic: Dict[str, Any]) -> Dict[str, Any]:
-    """Compare supported features descriptively, preserving nulls and labels."""
-    features = [
-        "probability_volatility", "jump_frequency", "activity_intensity",
-        "pre_event_spread", "post_event_spread", "volume_change", "depth_change",
-    ]
-    rows = []
-    errors = []
-    for feature in features:
-        left = getattr(observed, feature)
-        right = synthetic.get(feature)
-        error = abs(float(left) - float(right)) if left is not None and right is not None else None
-        if error is not None:
-            errors.append(error)
-        rows.append({"feature": feature, "observed": left, "synthetic": right, "match": error})
+    dp = signature.delta_probability
+    feats = signature.features or {}
+    if dp is not None and abs(dp) >= 0.05:
+        add("information_shock", f"probability move of {dp:+.2f}")
+    if (feats.get("max_jump") or 0) >= (feats.get("jump_threshold") or 0.05):
+        if not any(c["mechanism"] == "information_shock" for c in candidates):
+            add("information_shock", f"max jump {feats['max_jump']:.2f}")
+    if signature.volume_change is not None and signature.volume_change > 1.5:
+        add("herding", f"activity ratio {signature.volume_change:.1f}× during "
+                       "the move")
+    if (feats.get("volatility_clustering") or 0) > 0.1:
+        add("momentum_amplification",
+            f"volatility clustering {feats['volatility_clustering']:.2f}")
+    if signature.spread_change is not None and signature.spread_change > 0:
+        add("mm_withdrawal", f"spread expansion {signature.spread_change:+.3f}")
+    if signature.depth_change is not None and signature.depth_change < -0.2:
+        add("thin_liquidity", f"depth change {signature.depth_change:+.0%}")
+    if not candidates:
+        add("information_shock", "no strong cues; the default single-shock "
+                                 "baseline is the minimal starting hypothesis")
+
     return {
-        "label": "observed-versus-synthetic comparison",
-        "data_classes": {"observed": "OBSERVED", "synthetic": "SYNTHETIC", "match": "INFERRED"},
+        "bridge_version": BRIDGE_VERSION,
+        "signature_hash": signature.signature_hash(),
+        "dataset_id": signature.dataset_id,
+        "market_id": signature.market_id,
+        "observed": {
+            "delta_probability": signature.delta_probability,
+            "peak_probability": signature.peak_probability,
+            "spread_change": signature.spread_change,
+            "volume_change": signature.volume_change,
+            "depth_change": signature.depth_change,
+        },
+        "candidates": candidates,
+        "suggested_design": "ab: control = information shock alone; one "
+                            "treatment per additional candidate mechanism",
+        "disclaimer": "Candidate mechanisms are hypotheses for controlled "
+                      "synthetic experiments. None is claimed to explain "
+                      "the real-world observation.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Signature → ExperimentVersion (the ordinary machinery, nothing bespoke)
+# ---------------------------------------------------------------------------
+def experiment_from_signature(signature: EventSignature, *,
+                              mechanisms: Sequence[str],
+                              name: str,
+                              experiment_id: str = "exp_external_event",
+                              replications: int = 5,
+                              t0_step: int = 400,
+                              total_steps: int = 1200,
+                              root_seed: Optional[int] = None,
+                              question: Optional[str] = None,
+                              hypothesis: Optional[str] = None
+                              ) -> ExperimentVersion:
+    """Compile an observed signature into a normal ``ExperimentVersion``.
+
+    Control arm: information shock alone (the minimal event analogue).
+    One treatment arm per requested mechanism. The result is an ordinary
+    research object — same registry, batch runner, analysis, report, and
+    reproduction machinery as every other Tezcat experiment. No separate
+    research-identity system.
+    """
+    unknown = [m for m in mechanisms if m not in MECHANISMS]
+    if unknown:
+        raise BridgeError(f"unknown mechanisms {unknown}; "
+                          f"available: {sorted(MECHANISMS)}")
+    mechs = [m for m in mechanisms if m != "information_shock"]
+    if not mechs:
+        raise BridgeError(
+            "select at least one mechanism besides the information-shock "
+            "control — an experiment needs a comparison")
+
+    dp = signature.delta_probability
+    side = "buy" if (dp or 0) >= 0 else "sell"
+    config = bridge_base_config(t0_step=t0_step, total_steps=total_steps,
+                                shock_side=side)
+
+    treatments = [Arm(name=m, overrides=dict(MECHANISMS[m]["overrides"]))
+                  for m in mechs]
+    design = DesignSpec(
+        design_type="ab",
+        question=question or (
+            f"Which candidate mechanisms produce post-shock dynamics "
+            f"consistent with the episode observed in dataset "
+            f"{signature.dataset_id} (market {signature.market_id}, "
+            f"Δp={dp:+.2f})?" if dp is not None else
+            f"Which candidate mechanisms produce post-shock dynamics "
+            f"consistent with the episode observed in dataset "
+            f"{signature.dataset_id}?"),
+        hypothesis=hypothesis or (
+            "At least one candidate mechanism, added to a pure information "
+            "shock, shifts the synthetic episode descriptors toward the "
+            "observed signature. (A null result — no mechanism helps — is "
+            "a valid outcome.)"),
+        independent_variables=[f"mechanism:{m}" for m in mechs],
+        dependent_variables=["total_return", "realized_volatility",
+                             "max_drawdown", "average_spread", "total_volume"],
+        primary_metric="total_return",
+        control=Arm(name="information_shock_only"),
+        treatments=treatments,
+        replications=replications,
+    )
+    return ExperimentVersion(experiment_id=experiment_id, name=name,
+                             config=config, design=design,
+                             root_seed=root_seed)
+
+
+# ---------------------------------------------------------------------------
+# Research manifest: experiment identity × dataset identity
+# ---------------------------------------------------------------------------
+def research_manifest(version: ExperimentVersion,
+                      dataset: DatasetManifest,
+                      signature: EventSignature) -> Dict[str, Any]:
+    """The reproducibility contract for external-data research.
+
+    Reproducing this experiment means re-executing the research hash
+    *against this exact dataset version* — both identities are recorded,
+    and the combination is itself hashed.
+    """
+    payload = {
+        "experiment_hash": version.research_hash,
+        "dataset_hash": dataset.dataset_hash,
+        "signature_hash": signature.signature_hash(),
+    }
+    return {
+        **payload,
+        "research_identity": hashlib.sha256(
+            canonical_json(payload).encode()).hexdigest(),
+        "bridge_version": BRIDGE_VERSION,
+        "version_id": version.version_id,
+        "dataset_id": dataset.dataset_id,
+        "provider": dataset.provider,
+        "event_id": dataset.event_id,
+        "market_ids": dataset.market_ids,
+        "time_window": dataset.time_window,
+        "adapter_version": dataset.adapter_version,
+        "external_schema_version": dataset.external_schema_version,
+        "signature_window": {"t0_index": signature.t0_index,
+                             "pre": signature.pre_window,
+                             "post": signature.post_window},
+        "source_kind": dataset.source_kind,
+        "license": dataset.license,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dimensionless episode descriptors (the only comparison currency)
+# ---------------------------------------------------------------------------
+def dynamics_features(values: Sequence[float], t0_index: int
+                      ) -> Dict[str, Optional[float]]:
+    """Scale-free descriptors of an episode, identical for both domains.
+
+    Works on any ordered series (observed probabilities OR synthetic
+    prices) because every feature is dimensionless: increments are
+    standardized by their own standard deviation, times are fractions of
+    the post-window, and displacements are ratios. This is what makes an
+    observed-vs-synthetic comparison mathematically justified; comparing
+    raw levels across domains would not be.
+    """
+    n = len(values)
+    if not 0 < t0_index < n - 1:
+        raise BridgeError(f"t0_index {t0_index} must be interior to the "
+                          f"series (n={n})")
+    incr = [b - a for a, b in zip(values, values[1:])]
+    std = (sum((v - sum(incr) / len(incr)) ** 2 for v in incr)
+           / max(len(incr) - 1, 1)) ** 0.5
+    feats: Dict[str, Optional[float]] = {}
+
+    pre_level = values[t0_index]
+    post = values[t0_index:]
+    end = values[-1]
+    move = end - pre_level
+    disp = [(v - pre_level) for v in post]
+    direction = 1.0 if move >= 0 else -1.0
+    peak_idx = max(range(len(disp)), key=lambda i: direction * disp[i])
+    peak = disp[peak_idx]
+
+    feats["move_direction"] = direction
+    feats["time_to_peak_fraction"] = peak_idx / max(len(post) - 1, 1)
+    feats["overshoot"] = ((peak - move) / abs(peak)
+                          if abs(peak) > 1e-12 else None)
+    if std > 0:
+        z = [abs(v) / std for v in incr]
+        feats["jump_frequency_2sigma"] = sum(v > 2.0 for v in z) / len(z)
+        clustering = [acf([abs(v) for v in incr], lag) for lag in (1, 2, 5)]
+        clustering = [c for c in clustering if c is not None]
+        feats["volatility_clustering"] = (sum(clustering) / len(clustering)
+                                          if clustering else None)
+        pre_incr = incr[:t0_index]
+        post_incr = incr[t0_index:]
+
+        def _std(xs: Sequence[float]) -> Optional[float]:
+            if len(xs) < 3:
+                return None
+            m = sum(xs) / len(xs)
+            return (sum((v - m) ** 2 for v in xs) / (len(xs) - 1)) ** 0.5
+
+        s_pre, s_post = _std(pre_incr), _std(post_incr)
+        feats["post_pre_vol_ratio"] = (s_post / s_pre
+                                       if s_pre and s_post is not None else None)
+    else:
+        feats["jump_frequency_2sigma"] = None
+        feats["volatility_clustering"] = None
+        feats["post_pre_vol_ratio"] = None
+    return feats
+
+
+def compare_episode(observed_values: Sequence[float], observed_t0: int,
+                    synthetic_paths: Sequence[Sequence[float]],
+                    synthetic_t0: int) -> Dict[str, Any]:
+    """OBSERVED episode vs SYNTHETIC ensemble on dimensionless descriptors.
+
+    The synthetic side is an ensemble (>= 10 paths — a band from fewer is
+    decoration, same F9 rule). Output rows carry the q05–q95 band and an
+    inside/outside verdict per feature. A partial match is the expected
+    outcome; the table exists to say which dynamics the mechanism
+    reproduces and which it does not.
+    """
+    if len(synthetic_paths) < 10:
+        raise BridgeError(f"synthetic ensemble has {len(synthetic_paths)} "
+                          "paths; >= 10 replications are required")
+    observed = dynamics_features(observed_values, observed_t0)
+    ensemble = [dynamics_features(p, synthetic_t0) for p in synthetic_paths]
+
+    rows: Dict[str, Any] = {}
+    inside = total = 0
+    for name, obs_val in observed.items():
+        if obs_val is None:
+            continue
+        vals = [e.get(name) for e in ensemble]
+        vals = [v for v in vals if v is not None]
+        if len(vals) < 10:
+            rows[name] = {"observed": obs_val,
+                          "warning": "insufficient ensemble values"}
+            continue
+        d = describe(vals)
+        in_band = d["q05"] <= obs_val <= d["q95"]
+        rows[name] = {"observed": obs_val, "ensemble_mean": d["mean"],
+                      "band_q05": d["q05"], "band_q95": d["q95"],
+                      "inside_band": in_band,
+                      "z_distance": ((obs_val - d["mean"]) / d["std"])
+                                    if d["std"] > 0 else None}
+        total += 1
+        inside += in_band
+    return {
+        "labels": {"observed": "OBSERVED external market data",
+                   "synthetic": "SYNTHETIC Tezcat ensemble"},
+        "comparison_currency": "dimensionless episode descriptors "
+                               "(standardized increments; see "
+                               "dynamics_features)",
         "features": rows,
-        "mean_absolute_error": sum(errors) / len(errors) if errors else None,
-        "limitations": ["comparison is descriptive", "missing provider fields remain unavailable", "no causal claim is implied"],
+        "n_features": total,
+        "n_inside_band": inside,
+        "coverage": inside / total if total else None,
+        "n_ensemble": len(synthetic_paths),
+        "interpretation": "coverage reports which observed dynamics the "
+                          "synthetic ensemble reproduces under controlled "
+                          "assumptions — no claim about the real-world "
+                          "cause is made or implied",
     }
