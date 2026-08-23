@@ -153,20 +153,24 @@ export const api = {
   opsCancel: (id) => apiPost(`/ops/jobs/${encodeURIComponent(id)}/cancel`),
   opsRetry: (id) => apiPost(`/ops/jobs/${encodeURIComponent(id)}/retry`),
 
-  // External Event-Market Intelligence Layer (S3): read-only provider data.
-  externalProviders: () => apiGet('/markets/providers'),
-  externalEvents: (provider = 'kalshi', params = '') => apiGet(`/markets/events?provider=${encodeURIComponent(provider)}${params}`),
-  externalMarkets: (provider = 'kalshi', params = '') => apiGet(`/markets/markets?provider=${encodeURIComponent(provider)}${params}`),
-  externalMarket: (provider, id) => apiGet(`/markets/${encodeURIComponent(id)}?provider=${encodeURIComponent(provider)}`),
-  externalOrderbook: (provider, id, tokenId = '') => apiGet(`/markets/${encodeURIComponent(id)}/orderbook?provider=${encodeURIComponent(provider)}${tokenId ? `&token_id=${encodeURIComponent(tokenId)}` : ''}`),
-  externalHistory: (provider, id, params = '') => apiGet(`/markets/${encodeURIComponent(id)}/history?provider=${encodeURIComponent(provider)}${params}`),
-  externalSnapshot: (provider, id, body = {}) => apiPost(`/markets/${encodeURIComponent(id)}/snapshot?provider=${encodeURIComponent(provider)}`, body),
-  externalDatasets: (provider = '') => apiGet(`/markets/datasets${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
-  externalDataset: (id) => apiGet(`/markets/datasets/${encodeURIComponent(id)}`),
-  externalSignature: (id, body = {}) => apiPost(`/markets/datasets/${encodeURIComponent(id)}/signature`, body),
-  externalDivergence: (body) => apiPost('/markets/divergence', body),
-  externalProposal: (body) => apiPost('/markets/research', body),
-  externalCompile: (body) => apiPost('/markets/research/compile', body),
+  // External event-market intelligence (Phase S3)
+  marketsProviders: () => apiGet('/markets/providers'),
+  marketsDatasets: () => apiGet('/markets/datasets'),
+  marketsDataset: (id) => apiGet(`/markets/datasets/${encodeURIComponent(id)}`),
+  marketsObservations: (id, start = 0, limit = 5000) =>
+    apiGet(`/markets/datasets/${encodeURIComponent(id)}/observations?start=${start}&limit=${limit}`),
+  marketsSignature: (id, params = {}) => {
+    const q = Object.entries(params)
+      .filter(([, v]) => v !== '' && v != null)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join('&');
+    return apiGet(`/markets/datasets/${encodeURIComponent(id)}/signature${q ? `?${q}` : ''}`);
+  },
+  marketsPropose: (id) => apiGet(`/markets/datasets/${encodeURIComponent(id)}/propose`),
+  marketsMechanisms: () => apiGet('/markets/mechanisms'),
+  marketsResearch: (body) => apiPost('/markets/research', body),
+  marketsCompare: (body) => apiPost('/markets/compare', body),
+  marketsImport: (body) => apiPost('/markets/import', body),
 };
 
 // ---- small formatting helpers shared by pages ----------------------------

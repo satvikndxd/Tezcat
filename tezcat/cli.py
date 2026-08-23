@@ -8,6 +8,12 @@ Five verbs — the complete research loop, nothing else:
     tezcat reproduce <ref>        re-execute and verify against stored hashes
     tezcat list                   registered experiments
 
+Plus one namespaced group (Phase S3) for external event-market
+intelligence — read-only ingestion that feeds the same five-verb loop:
+
+    tezcat markets providers | datasets | import | show | signature |
+                   propose | research | compare
+
 ``<ref>`` is a version id (``expv_…``), a full research hash, or an
 unambiguous hash prefix (≥8 chars). The data directory defaults to
 ``$TEZCAT_DATA_DIR`` or ``./data``; override with ``--data-dir``.
@@ -197,55 +203,6 @@ def cmd_reproduce(args) -> int:
     return 1
 
 
-def cmd_markets(args) -> int:
-    from tezcat.external.service import ExternalMarketService
-    from tezcat.persistence.local import LocalStore
-
-    service = ExternalMarketService(LocalStore(_data_dir(args)))
-    if args.markets_command == "providers":
-        for provider in service.provider_ids():
-            adapter = service.provider(provider)
-            print(f"{provider:<12} read-only  {adapter.adapter_version}")
-        return 0
-    if args.markets_command == "datasets":
-        rows = service.datasets.list(args.provider)
-        if not rows:
-            print("no external datasets registered")
-            return 0
-        for row in rows:
-            print(f"{row['dataset_id']:<26} {row['provider']:<12} v{row['dataset_version']}  {row['source_id']}")
-        return 0
-    if args.markets_command == "events":
-        page = service.list_events(args.provider, limit=args.limit, status=args.status)
-        adapter = service.provider(args.provider)
-        for row in page.items:
-            event = adapter.normalize_event(row)
-            print(f"{event.event_id:<24} {event.title}")
-        if page.cursor:
-            print(f"next_cursor: {page.cursor}")
-        return 0
-    if args.markets_command == "list":
-        page = service.list_markets(args.provider, limit=args.limit, status=args.status, event_id=args.event_id)
-        adapter = service.provider(args.provider)
-        for row in page.items:
-            market = adapter.normalize_market(row)
-            print(f"{market.market_id:<32} {market.title}")
-        if page.cursor:
-            print(f"next_cursor: {page.cursor}")
-        return 0
-    if args.markets_command == "snapshot":
-        history = json.loads(Path(args.history_json).read_text()) if args.history_json else None
-        trades = json.loads(Path(args.trades_json).read_text()) if args.trades_json else None
-        result = service.snapshot(args.provider, args.market_id, token_id=args.token_id, history=history, trades=trades, source_id=args.source_id)
-        print(f"{OK} external dataset registered: {result['manifest']['dataset_id']}")
-        print(f"  provider:          {result['manifest']['provider']}")
-        print(f"  raw checksum:      {result['manifest']['raw_checksum']}")
-        print(f"  normalized checksum:{result['manifest']['normalized_checksum']}")
-        return 0
-    print(f"{BAD} unknown markets command", file=sys.stderr)
-    return 1
-
-
 def cmd_list(args) -> int:
     registry = _registry(args)
     rows = registry.list()
@@ -261,6 +218,249 @@ def cmd_list(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Markets verb group (Phase S3): external event-market intelligence
+# ---------------------------------------------------------------------------
+def _markets_service(args):
+    from tezcat.external.service import MarketsService
+    return MarketsService(_data_dir(args))
+
+
+def cmd_markets_providers(args) -> int:
+    for p in _markets_service(args).providers():
+        live = "live enabled" if p["live_enabled"] else "offline (fixtures only)"
+        print(f"{p['provider_id']:<12} {p['adapter_version']:<26} read-only · {live}")
+        print(f"{'':<12} auth: {p['auth']}")
+    return 0
+
+
+def cmd_markets_datasets(args) -> int:
+    rows = _markets_service(args).list_datasets()
+    if not rows:
+        print("no external datasets registered "
+              "(try: tezcat markets import kalshi SYN-MKT-YES "
+              "--fixture tests/fixtures/external/kalshi/synthetic_event.json)")
+        return 0
+    print(f"{'dataset':<18} {'provider':<12} {'src':<18} {'v':>2} {'obs':>5}  market")
+    for r in rows:
+        print(f"{r['dataset_id']:<18} {r['provider']:<12} "
+              f"{r['source_kind']:<18} {r['version']:>2} "
+              f"{r['n_observations']:>5}  {', '.join(r['market_ids'])}")
+    return 0
+
+
+def cmd_markets_import(args) -> int:
+    svc = _markets_service(args)
+    try:
+        m = svc.import_market(args.provider, args.market_id,
+                              fixture_path=args.fixture,
+                              start_ts=args.start_ts, end_ts=args.end_ts,
+                              period_minutes=args.period,
+                              supersedes=args.supersedes)
+    except Exception as exc:  # noqa: BLE001 — surface the exact reason
+        print(f"{BAD} import failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"{OK} dataset registered (immutable)")
+    print(f"  dataset:  {m.dataset_id} (v{m.version})")
+    print(f"  hash:     {m.dataset_hash}")
+    print(f"  source:   {m.provider} · {m.source_kind} · {m.adapter_version}")
+    print(f"  window:   {m.time_window['start']} → {m.time_window['end']}")
+    print(f"  license:  {m.license}")
+    print(f"\nnext: tezcat markets signature {m.dataset_id}")
+    return 0
+
+
+def cmd_markets_show(args) -> int:
+    svc = _markets_service(args)
+    try:
+        m = svc.dataset(args.dataset_id)
+        obs = svc.observations(args.dataset_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    label = ("SYNTHETIC FIXTURE DATA" if m.source_kind == "synthetic_fixture"
+             else "OBSERVED EXTERNAL MARKET DATA")
+    print(f"[{label}]")
+    for k, v in m.lineage().items():
+        print(f"  {k}: {v}")
+    print(f"\n  {'timestamp':<28} {'p (implied)':>11} {'spread':>8} {'volume':>8}")
+    for o in obs[: args.limit]:
+        print(f"  {o.timestamp:<28} {_f(o.implied_probability, 4):>11} "
+              f"{_f(o.spread, 4):>8} {_f(o.volume, 1):>8}")
+    if len(obs) > args.limit:
+        print(f"  … {len(obs) - args.limit} more observations")
+    return 0
+
+
+def cmd_markets_signature(args) -> int:
+    svc = _markets_service(args)
+    try:
+        sig = svc.signature(args.dataset_id, t0_index=args.t0,
+                            pre_window=args.pre, post_window=args.post)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    print(f"{OK} event signature (INFERRED from observed data; "
+          f"v{sig.signature_version})")
+    print(f"  hash:    {sig.signature_hash()}")
+    print(f"  window:  t0={sig.t0_index} [-{sig.pre_window}, +{sig.post_window}] "
+          f"({sig.window_start} → {sig.window_end})")
+    print(f"  p:       {_f(sig.pre_event_probability, 3)} → "
+          f"{_f(sig.post_event_probability, 3)} "
+          f"(Δ {_f(sig.delta_probability, 3)}, peak {_f(sig.peak_probability, 3)}"
+          f" after {sig.time_to_peak} obs)")
+    print(f"  spread:  {_f(sig.pre_event_spread, 4)} → {_f(sig.post_event_spread, 4)}")
+    print(f"  volume:  ×{_f(sig.volume_change, 2)}   depth: {_f(sig.depth_change, 2)}")
+    print(f"  note:    {sig.transform_notes}")
+    print(f"\nnext: tezcat markets research {args.dataset_id} "
+          f"--mechanisms herding,mm_withdrawal")
+    return 0
+
+
+def cmd_markets_propose(args) -> int:
+    svc = _markets_service(args)
+    try:
+        prop = svc.propose(args.dataset_id, t0_index=args.t0,
+                           pre_window=args.pre, post_window=args.post)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    print("candidate mechanisms (hypotheses to test — not explanations):")
+    for c in prop["candidates"]:
+        print(f"  · {c['mechanism']:<24} {c['rationale']}")
+    print(f"\n{prop['disclaimer']}")
+    return 0
+
+
+def cmd_markets_research(args) -> int:
+    svc = _markets_service(args)
+    mechanisms = [m.strip() for m in args.mechanisms.split(",") if m.strip()]
+    try:
+        result = svc.create_research(
+            args.dataset_id, mechanisms=mechanisms,
+            name=args.name or f"event-{args.dataset_id}",
+            replications=args.replications, t0_index=args.t0,
+            pre_window=args.pre, post_window=args.post,
+            t0_step=args.t0_step, total_steps=args.steps)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    rm = result["research_manifest"]
+    print(f"{OK} synthetic experiment registered from observed signature")
+    print(f"  version:           {result['version_id']}")
+    print(f"  research hash:     {result['research_hash']}")
+    print(f"  dataset hash:      {rm['dataset_hash']}")
+    print(f"  research identity: {rm['research_identity']}")
+    print(f"  planned runs:      {result['planned_runs']}")
+    if args.run:
+        from tezcat.experiments.batch import BatchRunner
+        print("running batch…")
+        batch = BatchRunner(svc.registry).run(result["version_id"])
+        mark = OK if batch["status"] == "completed" else "…"
+        print(f"{mark} batch {batch['status']}: "
+              f"{batch['completed']}/{batch['planned']} runs")
+        print(f"\nnext: tezcat analyze {result['version_id']}")
+    else:
+        print(f"\nnext: tezcat run — or — tezcat markets research … --run\n"
+              f"      then: tezcat analyze {result['version_id']}")
+    return 0
+
+
+def cmd_markets_compare(args) -> int:
+    svc = _markets_service(args)
+    try:
+        result = svc.compare_datasets(args.dataset_a, args.dataset_b,
+                                      threshold=args.threshold,
+                                      max_lag=args.max_lag)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    d = result["divergence"]
+    print("cross-provider probability divergence "
+          "(equivalence NOT verified):")
+    print(f"  aligned observations: {d['n_aligned']}")
+    print(f"  mean |divergence|:    {_f(d['mean_abs_divergence'], 4)}")
+    print(f"  peak |divergence|:    {_f(d['peak_abs_divergence'], 4)} "
+          f"at {d['peak_at']}")
+    print(f"  longest run ≥{d['threshold']}:  {d['longest_divergent_run']} obs")
+    print(f"  converged at:         {d['converged_at'] or '—'}")
+    ll = result["lead_lag"]
+    if "unavailable" in ll:
+        print(f"  lead/lag: unavailable ({ll['unavailable']})")
+    else:
+        print(f"  lead/lag observation: best lag {ll['best_lag']} "
+              f"(corr {_f(ll['best_correlation'], 3)}) — no causal claim")
+    return 0
+
+
+def _add_markets_parser(sub) -> None:
+    mk = sub.add_parser("markets",
+                        help="external event-market intelligence (read-only)")
+    msub = mk.add_subparsers(dest="markets_command", required=True)
+
+    mp = msub.add_parser("providers", help="list provider adapters")
+    mp.set_defaults(func=cmd_markets_providers)
+
+    md = msub.add_parser("datasets", help="list registered external datasets")
+    md.set_defaults(func=cmd_markets_datasets)
+
+    mi = msub.add_parser("import", help="import market history as an "
+                                        "immutable dataset")
+    mi.add_argument("provider", choices=["kalshi", "polymarket"])
+    mi.add_argument("market_id")
+    mi.add_argument("--fixture", default=None,
+                    help="labeled fixture bundle (offline import)")
+    mi.add_argument("--start-ts", type=int, default=0)
+    mi.add_argument("--end-ts", type=int, default=None)
+    mi.add_argument("--period", type=int, default=60,
+                    help="sampling period in minutes (default 60)")
+    mi.add_argument("--supersedes", default=None,
+                    help="dataset id this import supersedes (new version)")
+    mi.set_defaults(func=cmd_markets_import)
+
+    ms = msub.add_parser("show", help="dataset lineage + observations")
+    ms.add_argument("dataset_id")
+    ms.add_argument("--limit", type=int, default=10)
+    ms.set_defaults(func=cmd_markets_show)
+
+    for name, fn, hlp in (
+            ("signature", cmd_markets_signature,
+             "extract the documented event signature"),
+            ("propose", cmd_markets_propose,
+             "propose candidate mechanisms (hypotheses)")):
+        p = msub.add_parser(name, help=hlp)
+        p.add_argument("dataset_id")
+        p.add_argument("--t0", type=int, default=None,
+                       help="event-anchor observation index (default: "
+                            "largest |Δp|, recorded in the signature)")
+        p.add_argument("--pre", type=int, default=None)
+        p.add_argument("--post", type=int, default=None)
+        p.set_defaults(func=fn)
+
+    mr = msub.add_parser("research", help="compile the signature into an "
+                                          "ordinary experiment version")
+    mr.add_argument("dataset_id")
+    mr.add_argument("--mechanisms", required=True,
+                    help="comma-separated, e.g. herding,mm_withdrawal")
+    mr.add_argument("--name", default=None)
+    mr.add_argument("--replications", type=int, default=5)
+    mr.add_argument("--t0", type=int, default=None)
+    mr.add_argument("--pre", type=int, default=None)
+    mr.add_argument("--post", type=int, default=None)
+    mr.add_argument("--t0-step", type=int, default=400)
+    mr.add_argument("--steps", type=int, default=1200)
+    mr.add_argument("--run", action="store_true",
+                    help="also execute the batch now")
+    mr.set_defaults(func=cmd_markets_research)
+
+    mc = msub.add_parser("compare", help="cross-provider divergence + "
+                                         "lead/lag for two datasets")
+    mc.add_argument("dataset_a")
+    mc.add_argument("dataset_b")
+    mc.add_argument("--threshold", type=float, default=0.02)
+    mc.add_argument("--max-lag", type=int, default=10)
+    mc.set_defaults(func=cmd_markets_compare)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="tezcat",
@@ -301,32 +501,7 @@ def build_parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("list", help="list registered experiments")
     ls.set_defaults(func=cmd_list)
 
-    markets = sub.add_parser("markets", help="read-only external event-market intelligence")
-    markets_sub = markets.add_subparsers(dest="markets_command", required=True)
-    mp = markets_sub.add_parser("providers", help="list configured read-only providers")
-    mp.set_defaults(func=cmd_markets)
-    md = markets_sub.add_parser("datasets", help="list immutable external datasets")
-    md.add_argument("--provider", default=None)
-    md.set_defaults(func=cmd_markets)
-    me = markets_sub.add_parser("events", help="discover provider events")
-    me.add_argument("provider", choices=["kalshi", "polymarket"])
-    me.add_argument("--limit", type=int, default=20)
-    me.add_argument("--status", default=None)
-    me.set_defaults(func=cmd_markets)
-    mm = markets_sub.add_parser("list", help="discover provider markets")
-    mm.add_argument("provider", choices=["kalshi", "polymarket"])
-    mm.add_argument("--limit", type=int, default=20)
-    mm.add_argument("--status", default=None)
-    mm.add_argument("--event-id", default=None)
-    mm.set_defaults(func=cmd_markets)
-    ms = markets_sub.add_parser("snapshot", help="collect a read-only snapshot and persist raw/normalized lineage")
-    ms.add_argument("provider", choices=["kalshi", "polymarket"])
-    ms.add_argument("market_id")
-    ms.add_argument("--token-id", default=None)
-    ms.add_argument("--source-id", default=None)
-    ms.add_argument("--history-json", default=None, help="optional JSON kwargs for documented history")
-    ms.add_argument("--trades-json", default=None, help="optional JSON kwargs for documented trades")
-    ms.set_defaults(func=cmd_markets)
+    _add_markets_parser(sub)
     return p
 
 

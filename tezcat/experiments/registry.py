@@ -66,12 +66,14 @@ class Registry:
         return self._read(self.root / "index.json") or {}
 
     def external_dataset_store(self):
-        """Return the dataset store sharing this registry's artifact backend."""
+        """Return the external dataset store rooted in this data directory.
+
+        Datasets live under ``<data-dir>/external`` next to the registry, so
+        an external-context experiment and the dataset version it binds are
+        reproduced from the same tree.
+        """
         from tezcat.external.datasets import ExternalDatasetStore
-        if self.artifact_store is not None:
-            return ExternalDatasetStore(self.artifact_store)
-        from tezcat.persistence.local import LocalStore
-        return ExternalDatasetStore(LocalStore(str(self.root.parent)))
+        return ExternalDatasetStore(str(self.root.parent))
 
     def save_external_manifest(self, version_id: str, manifest: Dict[str, Any]) -> Dict[str, Any]:
         """Write the bridge manifest once and return the persisted copy."""
