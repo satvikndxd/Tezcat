@@ -551,3 +551,6 @@ select, input[type="number"], input:not([type]) {
   background: #0a0d10; border: 1px solid var(--border-2); color: var(--ink-bright);
   font: inherit; font-size: 12px; padding: 5px 8px; width: 100%;
 }
+
+/* Strategy Lab (Phase S4) */
+tr.selected-row td { background: rgba(74, 246, 195, 0.07); }

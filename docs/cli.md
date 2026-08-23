@@ -158,3 +158,20 @@ tezcat markets compare exd_A exd_B   # cross-provider divergence + lead/lag
 manifest binds the experiment hash to the exact dataset version, so
 `tezcat reproduce` verifies the experiment *with respect to that data*.
 Full guide: [docs/markets.md](markets.md).
+
+## Market Worlds and the Strategy Lab (Phase S4)
+
+Any registered experiment can be realized as deterministic **Market
+Worlds** and exposed to NautilusTrader strategies (optional `lab` extra):
+
+```bash
+tezcat worlds build <ref> [--cell C] [--replication N]   # content-addressed world
+tezcat worlds show mw_…                                  # manifest + ecology fingerprint
+tezcat worlds export mw_… --target nautilus              # canonical stream file
+tezcat lab strategies                                    # hashed reference library
+tezcat lab run mw_A mw_B --strategy ema_cross --param trade_size=50
+tezcat lab compare lab_… lab_…                           # same strategy, different worlds
+tezcat lab reproduce lab_…                               # research→world→strategy chain
+```
+
+Backtest/research only — no live trading. Full guide: [docs/lab.md](lab.md).
