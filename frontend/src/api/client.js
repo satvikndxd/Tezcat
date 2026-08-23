@@ -152,6 +152,25 @@ export const api = {
   opsSubmit: (versionRef) => apiPost('/ops/jobs', { version_ref: versionRef }),
   opsCancel: (id) => apiPost(`/ops/jobs/${encodeURIComponent(id)}/cancel`),
   opsRetry: (id) => apiPost(`/ops/jobs/${encodeURIComponent(id)}/retry`),
+
+  // External event-market intelligence (Phase S3)
+  marketsProviders: () => apiGet('/markets/providers'),
+  marketsDatasets: () => apiGet('/markets/datasets'),
+  marketsDataset: (id) => apiGet(`/markets/datasets/${encodeURIComponent(id)}`),
+  marketsObservations: (id, start = 0, limit = 5000) =>
+    apiGet(`/markets/datasets/${encodeURIComponent(id)}/observations?start=${start}&limit=${limit}`),
+  marketsSignature: (id, params = {}) => {
+    const q = Object.entries(params)
+      .filter(([, v]) => v !== '' && v != null)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join('&');
+    return apiGet(`/markets/datasets/${encodeURIComponent(id)}/signature${q ? `?${q}` : ''}`);
+  },
+  marketsPropose: (id) => apiGet(`/markets/datasets/${encodeURIComponent(id)}/propose`),
+  marketsMechanisms: () => apiGet('/markets/mechanisms'),
+  marketsResearch: (body) => apiPost('/markets/research', body),
+  marketsCompare: (body) => apiPost('/markets/compare', body),
+  marketsImport: (body) => apiPost('/markets/import', body),
 };
 
 // ---- small formatting helpers shared by pages ----------------------------

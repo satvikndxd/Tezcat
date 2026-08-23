@@ -332,6 +332,13 @@ select.inp option {
 .badge.cancelled { color: var(--dim); }
 .badge.ready { color: var(--up); border-color: rgba(74, 246, 195, 0.4); }
 
+/* Data-provenance labels (Phase S3): observed external data vs synthetic
+   fixtures vs inferred quantities — identity must never rest on color alone,
+   so the badge text itself always carries the full label. */
+.badge.observed { color: var(--up); border-color: rgba(74, 246, 195, 0.4); }
+.badge.synthetic { color: var(--accent); border-color: rgba(255, 153, 0, 0.4); }
+.badge.inferred { color: var(--cyan); border-color: rgba(74, 246, 195, 0.45); }
+
 .badge.regime-stable { color: var(--muted); }
 .badge.regime-crisis {
   color: var(--down);

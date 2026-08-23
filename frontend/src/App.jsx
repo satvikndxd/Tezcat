@@ -7,6 +7,7 @@ import Report from './pages/Report.jsx';
 import Research from './pages/Research.jsx';
 import Build from './pages/Build.jsx';
 import Ops from './pages/Ops.jsx';
+import Markets from './pages/Markets.jsx';
 
 // ---- tiny hash router ----------------------------------------------------
 
@@ -16,6 +17,9 @@ function parseRoute() {
   if (parts.length === 0) return { page: 'home' };
   if (parts[0] === 'build') return { page: 'build' };
   if (parts[0] === 'ops') return { page: 'ops' };
+  if (parts[0] === 'markets') {
+    return { page: 'markets', id: parts[1] ? decodeURIComponent(parts[1]) : null };
+  }
   if (parts[0] === 'research') {
     return { page: 'research', id: parts[1] ? decodeURIComponent(parts[1]) : null };
   }
@@ -71,6 +75,7 @@ function StatusBar() {
         <a href="#/">TEZCAT — MARKET ECOLOGY LAB</a>
         <a className="navlink" href="#/build">BUILD</a>
         <a className="navlink" href="#/research">RESEARCH</a>
+        <a className="navlink" href="#/markets">MARKETS</a>
         <a className="navlink" href="#/ops">TRADEOPS</a>
       </div>
       <div className="right">
@@ -104,6 +109,9 @@ export default function App() {
       break;
     case 'ops':
       page = <Ops />;
+      break;
+    case 'markets':
+      page = <Markets id={route.id} key={route.id || 'list'} />;
       break;
     default:
       page = <Home />;

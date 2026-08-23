@@ -138,3 +138,23 @@ All artifacts are plain JSON under the data directory
 experiment records), `registry/results/<batch>/` (seed-level rows with all
 hashes), `registry/analysis/`, `registry/reports/`. Nothing needs a
 database, the network, or AWS.
+
+## Starting from an external market observation (Phase S3)
+
+The `tezcat markets` group feeds the same five-verb loop from real
+prediction-market data — read-only, offline by default, with immutable
+checksummed datasets:
+
+```bash
+tezcat markets import kalshi <ticker> --fixture <bundle.json>  # or live with TEZCAT_EXTERNAL_LIVE=1
+tezcat markets show exd_…            # lineage + observations (labeled)
+tezcat markets signature exd_…       # hashed, versioned event signature
+tezcat markets propose exd_…         # candidate mechanisms (hypotheses)
+tezcat markets research exd_… --mechanisms herding,mm_withdrawal --run
+tezcat markets compare exd_A exd_B   # cross-provider divergence + lead/lag
+```
+
+`markets research` mints an ordinary `ExperimentVersion` whose research
+manifest binds the experiment hash to the exact dataset version, so
+`tezcat reproduce` verifies the experiment *with respect to that data*.
+Full guide: [docs/markets.md](markets.md).

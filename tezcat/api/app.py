@@ -751,6 +751,14 @@ def api_ops_retry(job_id: str):
 
 
 # ---------------------------------------------------------------------------
+# MARKETS (Phase S3): external event-market intelligence — read-only
+# ---------------------------------------------------------------------------
+from tezcat.api.markets import router as markets_router  # noqa: E402
+
+app.include_router(markets_router)
+
+
+# ---------------------------------------------------------------------------
 # Static dashboard (built React app) — mounted last so /api wins.
 # ---------------------------------------------------------------------------
 _dist = Path(os.environ.get("TEZCAT_FRONTEND_DIST",
