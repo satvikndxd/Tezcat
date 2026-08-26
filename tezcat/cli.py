@@ -20,6 +20,11 @@ deterministic market worlds and strategy backtests against them:
     tezcat worlds build | list | show | export
     tezcat lab strategies | run | results | show | compare | reproduce
 
+And the research control plane (Phase S5) — the full quant workflow as
+one linked, reproducible artifact graph:
+
+    tezcat plane slice | artifacts | show | verify | reproduce
+
 ``<ref>`` is a version id (``expv_…``), a full research hash, or an
 unambiguous hash prefix (≥8 chars). The data directory defaults to
 ``$TEZCAT_DATA_DIR`` or ``./data``; override with ``--data-dir``.
@@ -399,6 +404,158 @@ def cmd_markets_compare(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Research plane verb group (Phase S5): the quant research operating layer
+# ---------------------------------------------------------------------------
+def cmd_plane_slice(args) -> int:
+    from tezcat.plane.portfolio import CostModel, PortfolioConstraints
+    from tezcat.plane.slice import run_full_slice
+    try:
+        out = run_full_slice(
+            _data_dir(args), history_ref=args.ref, history_cell=args.cell,
+            stress_cells=(args.stress_cells.split(",")
+                          if args.stress_cells else None),
+            model_id=args.model, horizon=args.horizon, n_paths=args.paths,
+            seed=args.seed, optimizer_id=args.optimizer,
+            optimizer_params=({"risk_aversion": args.risk_aversion}
+                              if args.optimizer == "reference_cvar" else None),
+            constraints=PortfolioConstraints(max_weight=args.max_weight),
+            costs=CostModel(transaction_cost_bps=args.cost_bps),
+            strategy_id=args.strategy, capital=args.cash)
+    except Exception as exc:  # noqa: BLE001 — surface exact reason
+        print(f"{BAD} slice failed: {exc}", file=sys.stderr)
+        return 1
+    ed = out["edge_decay"]
+    print(f"{OK} full-stack slice complete "
+          f"(forecast → portfolio → worlds → execution → risk → report)")
+    print(f"  report:    {out['report_artifact']}")
+    print(f"  forecast:  {out['forecast_artifact']}")
+    print(f"  portfolio: {out['portfolio_artifact']} "
+          f"(risky weight {out['risky_weight']:.2f})")
+    print(f"  backtests: {', '.join(out['backtest_artifacts']) or '— (zero allocation)'}")
+    print("  edge decay (measured):")
+    for key in ("model_edge_expected", "portfolio_edge_gross",
+                "portfolio_edge_net_of_declared_costs",
+                "execution_realized_median", "execution_realized_q05"):
+        print(f"    {key:<38} {_f(ed[key], 5)}")
+    print(f"\nnext: tezcat plane reproduce {out['report_artifact']}")
+    return 0
+
+
+def cmd_plane_artifacts(args) -> int:
+    from tezcat.plane import ArtifactGraph
+    rows = ArtifactGraph(_data_dir(args)).list(args.type)
+    if not rows:
+        print("no research artifacts (try: tezcat plane slice <experiment-ref>)")
+        return 0
+    print(f"{'artifact':<18} {'type':<18} {'parents':>7}  external identity")
+    for r in rows:
+        print(f"{r['artifact_id']:<18} {r['artifact_type']:<18} "
+              f"{len(r['parent_hashes']):>7}  "
+              f"{(r['external_identity'] or '—')[:44]}")
+    return 0
+
+
+def cmd_plane_show(args) -> int:
+    from tezcat.plane import ArtifactGraph, PlaneError
+    graph = ArtifactGraph(_data_dir(args))
+    try:
+        artifact = graph.get(args.artifact_id)
+        chain = graph.lineage(args.artifact_id)
+    except PlaneError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    print(f"{artifact.artifact_type} {artifact.artifact_id}")
+    print(f"  hash:     {artifact.artifact_hash}")
+    print(f"  payload:  {artifact.payload_checksum[:32]}…")
+    print(f"  created:  {artifact.created_at}")
+    print(f"  external: {artifact.external_identity or '—'}")
+    print(f"  env:      python {artifact.environment.get('python_version')} · "
+          f"nautilus {artifact.environment.get('nautilus_trader_version')} · "
+          f"skfolio {artifact.environment.get('skfolio_version')}")
+    print("  lineage (root → this):")
+    for node in chain:
+        marker = "► " if node.artifact_id == artifact.artifact_id else "  "
+        print(f"   {marker}{node.artifact_type:<18} {node.artifact_id}")
+    if args.payload:
+        print(json.dumps(graph.payload(args.artifact_id), indent=1)[:4000])
+    return 0
+
+
+def cmd_plane_verify(args) -> int:
+    from tezcat.plane import ArtifactGraph, PlaneError
+    try:
+        result = ArtifactGraph(_data_dir(args)).verify(args.artifact_id)
+    except PlaneError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    for c in result["checks"]:
+        print(f"{OK if c['ok'] else BAD} {c['check']}")
+    return 0 if result["success"] else 1
+
+
+def cmd_plane_reproduce(args) -> int:
+    from tezcat.plane.slice import reproduce_slice
+    try:
+        rep = reproduce_slice(_data_dir(args), args.report_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    for c in rep["checks"]:
+        mark = OK if c["ok"] else BAD
+        print(f"{mark} {c['check']}" + (f"  ({c['detail']})" if c["detail"] else ""))
+    if rep["success"]:
+        print(f"\n{OK} SLICE REPRODUCTION SUCCESSFUL — every artifact hash "
+              "in the chain matches")
+        return 0
+    print(f"\n{BAD} SLICE REPRODUCTION FAILED"
+          + (f" — {rep.get('reason')}" if rep.get("reason") else ""),
+          file=sys.stderr)
+    return 1
+
+
+def _add_plane_parser(sub) -> None:
+    pl = sub.add_parser("plane", help="research control plane: forecast → "
+                                      "portfolio → worlds → execution")
+    psub = pl.add_subparsers(dest="plane_command", required=True)
+
+    sl = psub.add_parser("slice", help="run the full vertical slice")
+    sl.add_argument("ref", help="experiment version id / research hash prefix")
+    sl.add_argument("--cell", default=None, help="history cell (default: first)")
+    sl.add_argument("--stress-cells", default=None,
+                    help="comma-separated cells (default: all cells)")
+    sl.add_argument("--model", default="bootstrap_reference")
+    sl.add_argument("--optimizer", default="reference_cvar",
+                    choices=["reference_cvar", "skfolio_cvar"])
+    sl.add_argument("--strategy", default="buy_hold")
+    sl.add_argument("--horizon", type=int, default=60)
+    sl.add_argument("--paths", type=int, default=200)
+    sl.add_argument("--seed", type=int, default=7)
+    sl.add_argument("--cash", type=float, default=1_000_000.0)
+    sl.add_argument("--cost-bps", type=float, default=10.0)
+    sl.add_argument("--risk-aversion", type=float, default=2.0)
+    sl.add_argument("--max-weight", type=float, default=0.8)
+    sl.set_defaults(func=cmd_plane_slice)
+
+    ar = psub.add_parser("artifacts", help="list research artifacts")
+    ar.add_argument("--type", default=None)
+    ar.set_defaults(func=cmd_plane_artifacts)
+
+    sh = psub.add_parser("show", help="artifact record + lineage")
+    sh.add_argument("artifact_id")
+    sh.add_argument("--payload", action="store_true")
+    sh.set_defaults(func=cmd_plane_show)
+
+    ve = psub.add_parser("verify", help="re-verify checksums and hash")
+    ve.add_argument("artifact_id")
+    ve.set_defaults(func=cmd_plane_verify)
+
+    rp = psub.add_parser("reproduce", help="re-run the slice and compare "
+                                           "every artifact hash")
+    rp.add_argument("report_id")
+    rp.set_defaults(func=cmd_plane_reproduce)
+
+
+# ---------------------------------------------------------------------------
 # Worlds + Strategy Lab verb groups (Phase S4): the Nautilus bridge
 # ---------------------------------------------------------------------------
 def cmd_worlds_build(args) -> int:
@@ -775,6 +932,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_markets_parser(sub)
     _add_worlds_parser(sub)
     _add_lab_parser(sub)
+    _add_plane_parser(sub)
     return p
 
 

@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-376_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-415_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -56,6 +56,7 @@ Tezcat does not predict markets. It creates artificial markets populated by hete
 | **Parallel & Hardened** | [`--workers N` process-pool replications (byte-identical for any worker count), fault-injection-tested storage, differential reference matcher, environment-aware benchmarks](docs/benchmarks.md) |
 | **Scenario Builder** | [Design your own market in the dashboard](docs/scenarios.md): agents, behavior, risk, shock timeline — compiled into the canonical experiment schema with the research identity previewed before you run; templates, drafts, import/export |
 | **TradeOps** | [Operational layer around execution](docs/scenarios.md): queue, workers, explicit failures, identity-preserving retries, duplicate-execution guard, env-configurable capacity guardrails |
+| **Research Control Plane** | [The quant research operating layer](docs/architecture/research-plane.md): one typed, hashed artifact graph across the full workflow — forecast desk (provider-neutral `ForecastModel`, uncertainty first-class), portfolio desk (reference CVaR + optional skfolio, costs before performance, deterministic decision traces), and the full **forecast → portfolio → worlds → execution → risk → report** slice with a measured edge-decay pipeline and whole-chain reproduction |
 | **Strategy Lab (Nautilus bridge)** | [Two-layer laboratory](docs/lab.md): deterministic, content-addressed **Market Worlds** with hashed ecology fingerprints, exported as standard `QuoteTick`/`TradeTick` streams into NautilusTrader backtests; hashed reference strategies, regime-conditioned execution metrics, and full-chain reproduction (research hash → world hash → strategy hash) — backtest/research only, optional `lab` extra |
 | **External Event-Market Intelligence** | [Read-only Kalshi + Polymarket adapters](docs/markets.md): immutable checksummed datasets, market-implied probability proxies with named transforms, event signatures, cross-provider divergence & lead/lag, and an observed-event → ordinary-experiment research bridge — external data feeds calibration and design, **never** the kernel |
 | **REST API + Dashboard** | FastAPI control plane; minimalist Bloomberg-style black terminal UI (React + custom SVG charts) |
@@ -105,6 +106,15 @@ tezcat worlds build expv_… --cell control    # content-addressed world + finge
 tezcat lab run mw_A mw_B --strategy ema_cross --param trade_size=50
 tezcat lab compare lab_… lab_…               # same strategy, different worlds
 tezcat lab reproduce lab_…                   # full-chain verification
+```
+
+And (S5) the whole quant workflow runs as one linked, reproducible chain:
+
+```bash
+tezcat plane slice expv_…                    # forecast → portfolio → worlds
+                                             #   → Nautilus → risk → report
+tezcat plane show pft_…                      # any artifact + its lineage
+tezcat plane reproduce rpt_…                 # every hash in the chain re-verified
 ```
 
 `reproduce` takes the research hash you'd cite in a paper (any unambiguous
@@ -272,7 +282,7 @@ tezcat/
 frontend/                # React dashboard (Vite, custom SVG charts)
 examples/                # ready-to-run experiment specs (margin spiral AB)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 376 tests: unit / property / determinism / replay / differential / fault / external
+tests/                   # 415 tests: unit / property / determinism / replay / differential / fault / external
 ```
 
 ## Public deployment
@@ -313,6 +323,7 @@ Tezcat is being hardened from an MVP artificial-market laboratory into a researc
 | S2 | Custom Scenario Builder, TradeOps, Docker/Daytona prep | ✅ | [docs/scenarios.md](docs/scenarios.md) · [docs/docker.md](docs/docker.md) |
 | S3 | External event-market intelligence: Kalshi/Polymarket read-only adapters, immutable datasets, signatures, cross-provider research, observed→synthetic bridge, MARKETS section | ✅ | [docs/markets.md](docs/markets.md) |
 | S4 | Strategy Lab: deterministic Market Worlds + ecology fingerprints, NautilusTrader backtest bridge, regime-conditioned metrics, provenance-chained reproduction, LAB section | ✅ | [docs/lab.md](docs/lab.md) |
+| S5 | Research control plane: artifact graph, forecasting + portfolio desks (reference models + optional skfolio), full-stack vertical slice with edge-decay analysis and hash-for-hash reproduction | ✅ | [docs/architecture/research-plane.md](docs/architecture/research-plane.md) |
 
 Not yet implemented (target roadmap, not current facts): Nautilus co-simulation (a strategy as a live participant inside the Tezcat ecology — gated on an explicit synchronization contract; see docs/lab.md), live/sandbox trading of any kind, live external ingestion is opt-in and unexercised by tests (adapters ship with offline labeled fixtures; no recorded provider data is bundled), WebSocket/streaming ingestion and recorded-stream replay, resolution-calibration studies at scale (needs a legitimately obtained resolved-market corpus), multi-machine distributed execution (single-machine parallel workers exist), latency modeling, funding-network contagion. Single-seed preset outputs are demonstrations, not evidence.
 
@@ -333,6 +344,8 @@ Not yet implemented (target roadmap, not current facts): Nautilus co-simulation 
 | [docs/scenarios.md](docs/scenarios.md) | Custom scenarios, scenario/experiment/run semantics, TradeOps queue and guardrails |
 | [docs/markets.md](docs/markets.md) | External event-market intelligence: provider adapters, dataset lineage, event signatures, cross-provider research, the observed→synthetic bridge |
 | [docs/lab.md](docs/lab.md) | Strategy Lab: Market Worlds, ecology fingerprints, the NautilusTrader bridge, metric definitions, determinism boundary, co-simulation gating |
+| [docs/architecture/research-plane.md](docs/architecture/research-plane.md) · [docs/architecture/artifact-graph.md](docs/architecture/artifact-graph.md) | The S5 research control plane: desks, contracts, and the unified provenance graph |
+| [docs/security/execution-boundaries.md](docs/security/execution-boundaries.md) | Research / paper / sandbox / live separation, credential rules, no-AI-in-measurement policy |
 | [docs/docker.md](docs/docker.md) | Container launch, complete env-var list, public-demo limits, Daytona readiness |
 | [docs/api.md](docs/api.md) · [docs/architecture.md](docs/architecture.md) · [docs/deployment.md](docs/deployment.md) | REST contract, system architecture, AWS deployment |
 | [docs/public-demo.md](docs/public-demo.md) | GitHub Pages + Render public demo deployment, limits, persistence, CI/CD, validation |

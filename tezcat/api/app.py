@@ -947,6 +947,14 @@ app.include_router(lab_router)
 
 
 # ---------------------------------------------------------------------------
+# RESEARCH PLANE (Phase S5): artifact graph + full-stack slice — research only
+# ---------------------------------------------------------------------------
+from tezcat.api.plane import router as plane_router  # noqa: E402
+
+app.include_router(plane_router)
+
+
+# ---------------------------------------------------------------------------
 # Static dashboard (built React app) — mounted last so /api wins.
 # ---------------------------------------------------------------------------
 _dist = Path(os.environ.get("TEZCAT_FRONTEND_DIST",
