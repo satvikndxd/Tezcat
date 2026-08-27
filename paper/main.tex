@@ -323,7 +323,7 @@ partitioned into implemented/configured versus future work
 \end{figure*}
 
 \begin{table}[t]
-\caption{Subsystem inventory (audited at commit \texttt{16448b4})}
+\caption{Subsystem inventory (audited at commit \texttt{af12ef0})}
 \label{tab:subsystems}
 \centering
 \scriptsize
@@ -532,9 +532,11 @@ execution with fault injection and differential validation (F11)---was
 required to keep that baseline byte-identical. The suite grew from 51
 tests (F0) to 208 at the end of S1, then 231 (S2, scenarios and
 TradeOps), 335 (S3, external intelligence), 376 (S4, market worlds and
-the NautilusTrader bridge), and 415 at the audited commit
-(\texttt{16448b4}), where all 415 tests pass and the seed-42
-determinism gate still reports identical outputs. A stronger
+the NautilusTrader bridge), and 415 at the prior paper-audit commit
+(\texttt{16448b4}). In the current checkout (\texttt{af12ef0}), the
+restored documented offline data provider yields 380 passing tests and
+7 explicit skips; the seed-42 determinism gate still reports identical
+outputs. A stronger
 demonstration appears in Sec.~\ref{sec:casestudy}: an experiment
 specification committed several development phases earlier re-minted
 its original research hash exactly when re-registered at the audited
@@ -840,7 +842,7 @@ enumerates claims it must never make (e.g., ``automated hedge fund,''
 \section{Experimental Evaluation}
 \label{sec:eval}
 All evidence in this section was re-verified at commit
-\texttt{16448b4}; no number is carried forward from documentation
+\texttt{af12ef0}; no number is carried forward from documentation
 without re-execution unless explicitly labeled as an archived value.
 
 \subsubsection*{A. Determinism} The engine-level gate (same seed
@@ -902,10 +904,12 @@ reproduction of a signature-derived experiment.
 scenarios into registered experiments and execute them through
 TradeOps, confirming the single-execution-path property.
 
-The complete suite comprises \textbf{415 tests, all passing} at the
-audited commit ($\approx$37\,s wall time in the development
-container), spanning unit, property, determinism, replay, differential,
-fault-injection, and integration levels.
+The current suite run comprises \textbf{380 passing tests and 7
+skips} at the audited commit (approximately 28\,s wall time in the
+development container), spanning unit, property, determinism, replay,
+differential, fault-injection, and integration levels. The historical
+415-test count belongs to the prior paper-audit commit and is not used
+as the current total.
 
 \begin{table}[t]
 \caption{Frozen seed-42 preset baselines (F0 audit record, verbatim;
@@ -1246,7 +1250,7 @@ markets become falsifiable, replicable, and reproducible experiments.
 
 \section*{Reproducibility Statement}
 All experiments in this paper are reproducible from the repository at
-commit \texttt{16448b45c1c4} (415/415 tests passing). The complete
+commit \texttt{af12ef0756c8} (380 passing, 7 skipped). The complete
 loop is:
 {\footnotesize\begin{verbatim}
 tezcat run examples/leverage_liquidity_map.json

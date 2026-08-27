@@ -7,10 +7,10 @@ Experimental Research on Emergent Financial-Market Phenomena"
 ## Provenance
 
 - **Repository commit used for every quantitative claim:**
-  `16448b45c1c4ca2da92ff0ce2d68388d0d182492`
-- **Test suite at that commit:** 415 passed (verified by running
+  `af12ef0756c8cf8ef568edbc509e65e41d73917e`
+- **Test suite at that commit:** 380 passed, 7 skipped (verified by running
   `.venv/bin/python -m pytest tests -q`).
-- All experiment statistics were **re-executed** at that commit (not
+- All experiment statistics were **re-executed** at the paper-audit commit (not
   copied from documentation): the leverage×liquidity map
   (`expv_60fabaa6f7ca`, 300 runs), the 2×2 extremes
   (`expv_cfc17774801a`, 120 runs), and the margin-spiral A/B
@@ -64,3 +64,6 @@ tezcat reproduce 60fabaa6        # verifies every stored hash
   external table files.
 - The author-affiliation field is a deliberate placeholder: no
   institutional affiliation is established in repository materials.
+- The current checkout also restores the documented offline `tezcat.data`
+  file provider, which is required by the calibration tests and paper’s
+  data-lineage claims.

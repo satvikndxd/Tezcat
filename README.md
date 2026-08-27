@@ -3,7 +3,7 @@
 > Financial markets are complex adaptive systems. **Tezcat** is a deterministic computational laboratory for exploring how simple trading behaviors combine to produce bubbles, crashes, liquidity crises, and recoveries — through controlled, reproducible experiments rather than historical prediction.
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-415_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-380_passing-brightgreen?style=flat-square)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square)](https://fastapi.tiangolo.com/)
 [![React + Vite](https://img.shields.io/badge/React-Vite-61dafb?style=flat-square)](https://react.dev/)
 [![Deterministic](https://img.shields.io/badge/Reproducible-bit--for--bit-6a40e5?style=flat-square)](docs/reproducibility.md)
@@ -282,7 +282,7 @@ tezcat/
 frontend/                # React dashboard (Vite, custom SVG charts)
 examples/                # ready-to-run experiment specs (margin spiral AB)
 infra/                   # AWS SAM template + parked CI workflow (infra/ci/)
-tests/                   # 415 tests: unit / property / determinism / replay / differential / fault / external
+tests/                   # verified suite: 380 passed, 7 skipped (unit / property / determinism / replay / differential / fault / external)
 ```
 
 ## Public deployment

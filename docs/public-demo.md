@@ -112,7 +112,7 @@ To remove the backend, open the `tezcat-public-demo` Blueprint in the Render das
 | Public guardrails | Configured in `render.yaml` and FastAPI boundary helpers |
 | No secrets committed | Passed; deployment configuration contains only public URLs and non-secret limits |
 | Focused existing research tests | Passed; 11 tests passed |
-| Full existing test suite | Blocked by a pre-existing repository issue: `tests/unit/test_stylized_facts.py` imports `tezcat.data`, but no tracked `tezcat/data` package exists in the provided `main` commit. This deployment task did not alter the frozen research engine to repair that unrelated issue. |
+| Full existing test suite | Verified locally after restoring the documented offline `tezcat.data` file provider: 380 passed, 7 skipped. |
 
 [^1]: [Render, “Deploy for Free”](https://render.com/docs/free)
 [^2]: [GitHub Docs, “Configuring a publishing source for your GitHub Pages site”](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
