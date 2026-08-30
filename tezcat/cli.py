@@ -25,6 +25,10 @@ one linked, reproducible artifact graph:
 
     tezcat plane slice | artifacts | show | verify | reproduce
 
+And fundamental valuation & transaction analysis (Phase S6):
+
+    tezcat finance run | list | report | reproduce
+
 ``<ref>`` is a version id (``expv_…``), a full research hash, or an
 unambiguous hash prefix (≥8 chars). The data directory defaults to
 ``$TEZCAT_DATA_DIR`` or ``./data``; override with ``--data-dir``.
@@ -401,6 +405,150 @@ def cmd_markets_compare(args) -> int:
         print(f"  lead/lag observation: best lag {ll['best_lag']} "
               f"(corr {_f(ll['best_correlation'], 3)}) — no causal claim")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Finance verb group (Phase S6): valuation & transaction analysis
+# ---------------------------------------------------------------------------
+def cmd_finance_run(args) -> int:
+    from tezcat.finance.case import register_case
+    from tezcat.finance.statements import FinanceError
+    spec_path = Path(args.spec)
+    if not spec_path.exists():
+        print(f"{BAD} case spec not found: {spec_path}", file=sys.stderr)
+        return 1
+    try:
+        spec = json.loads(spec_path.read_text())
+    except json.JSONDecodeError as exc:
+        print(f"{BAD} spec is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+    if args.validate_only:
+        from tezcat.finance.case import ValuationCase
+        try:
+            case = ValuationCase.from_spec(spec)
+        except FinanceError as exc:
+            print(f"{BAD} invalid case: {exc}", file=sys.stderr)
+            return 1
+        print(f"{OK} case valid — would mint {case.version_id} "
+              f"(hash {case.case_hash()[:16]}…)")
+        return 0
+    try:
+        reg = register_case(_data_dir(args), spec)
+    except FinanceError as exc:
+        print(f"{BAD} case failed: {exc}", file=sys.stderr)
+        return 1
+    r = reg["results"]
+    tri = r["triangulation"]
+    print(f"{OK} valuation case executed and registered (immutable)")
+    print(f"  case:      {reg['version_id']} · artifact {reg['case_artifact']}")
+    print(f"  case hash: {reg['case_hash']}")
+    print(f"  output:    {reg['output_artifact']} · report "
+          f"{reg['report_artifact']}")
+    print(f"  DCF:       {_f(r['dcf']['implied_value_per_share'], 2)}/share "
+          f"(EV {_f(r['dcf']['enterprise_value'], 0)}, TV "
+          f"{r['dcf']['terminal_value_pct_of_ev']:.0%} of EV)")
+    for m in tri["methods"]:
+        print(f"  {m['method']:<24} {_f(m['implied_value_per_share'], 2)}/share")
+    print(f"  range:     {_f(tri['low'], 2)} – {_f(tri['high'], 2)} "
+          f"(current {_f(tri['current_share_price'], 2)})")
+    if "pro_forma" in r:
+        y1 = r["pro_forma"]["years"][0]
+        print(f"  deal:      {_f(r['transaction']['offer_price_per_share'], 2)}"
+              f"/share → year-1 EPS {_f(y1['accretion_dilution_pct'] * 100, 2)}% "
+              f"({y1['verdict']})")
+    if "scenario_analysis" in r:
+        sa = r["scenario_analysis"]
+        print(f"  scenarios: {_f(sa['value_per_share_low'], 2)} – "
+              f"{_f(sa['value_per_share_high'], 2)}/share "
+              f"(spread {_f(sa['spread'], 2)})")
+    print(f"\nnext: tezcat finance report {reg['case_artifact']}")
+    return 0
+
+
+def cmd_finance_list(args) -> int:
+    from tezcat.plane import ArtifactGraph
+    rows = ArtifactGraph(_data_dir(args)).list("valuation_case")
+    if not rows:
+        print("no valuation cases "
+              "(try: tezcat finance run examples/finance/meridian_case.json)")
+        return 0
+    print(f"{'artifact':<18} {'external identity (case hash)':<40} created")
+    for r in rows:
+        print(f"{r['artifact_id']:<18} {(r['external_identity'] or '')[:40]:<40} "
+              f"{r['created_at'][:19]}")
+    return 0
+
+
+def cmd_finance_report(args) -> int:
+    from tezcat.plane import ArtifactGraph, PlaneError
+    graph = ArtifactGraph(_data_dir(args))
+    try:
+        case_art = graph.get(args.case_artifact)
+        reports = [c for c in graph.children(args.case_artifact)]
+        # report is a grandchild: case -> output -> report
+        report_md = None
+        for child in reports:
+            for grand in graph.children(child["artifact_id"]):
+                if grand["artifact_type"] == "finance_report":
+                    report_md = graph.payload(grand["artifact_id"])["markdown"]
+        if report_md is None:
+            print(f"{BAD} no finance_report artifact linked to "
+                  f"{args.case_artifact}", file=sys.stderr)
+            return 1
+    except PlaneError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report_md)
+        print(f"{OK} report written to {args.output}")
+    else:
+        print(report_md)
+    return 0
+
+
+def cmd_finance_reproduce(args) -> int:
+    from tezcat.finance.case import reproduce_case
+    from tezcat.finance.statements import FinanceError
+    try:
+        rep = reproduce_case(_data_dir(args), args.case_artifact)
+    except FinanceError as exc:
+        print(f"{BAD} {exc}", file=sys.stderr)
+        return 1
+    for c in rep["checks"]:
+        mark = OK if c["ok"] else BAD
+        print(f"{mark} {c['check']}"
+              + (f"  ({c['detail']})" if c["detail"] else ""))
+    if rep["success"]:
+        print(f"\n{OK} FINANCE REPRODUCTION SUCCESSFUL — outputs "
+              "byte-identical to the persisted artifacts")
+        return 0
+    print(f"\n{BAD} FINANCE REPRODUCTION FAILED", file=sys.stderr)
+    return 1
+
+
+def _add_finance_parser(sub) -> None:
+    fin = sub.add_parser("finance", help="valuation & transaction analysis")
+    fsub = fin.add_subparsers(dest="finance_command", required=True)
+
+    run = fsub.add_parser("run", help="execute and register a valuation case")
+    run.add_argument("spec", help="path to a case spec JSON")
+    run.add_argument("--validate-only", action="store_true")
+    run.set_defaults(func=cmd_finance_run)
+
+    ls = fsub.add_parser("list", help="list registered valuation cases")
+    ls.set_defaults(func=cmd_finance_list)
+
+    rp = fsub.add_parser("report", help="print/write the persisted report")
+    rp.add_argument("case_artifact", help="case artifact id (vca_…)")
+    rp.add_argument("-o", "--output", default=None)
+    rp.set_defaults(func=cmd_finance_report)
+
+    rd = fsub.add_parser("reproduce", help="re-run the persisted case and "
+                                           "verify output hashes")
+    rd.add_argument("case_artifact")
+    rd.set_defaults(func=cmd_finance_reproduce)
 
 
 # ---------------------------------------------------------------------------
@@ -933,6 +1081,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_worlds_parser(sub)
     _add_lab_parser(sub)
     _add_plane_parser(sub)
+    _add_finance_parser(sub)
     return p
 
 

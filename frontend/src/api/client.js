@@ -184,6 +184,13 @@ export const api = {
   labResult: (id) => apiGet(`/lab/results/${encodeURIComponent(id)}`),
   labCompare: (resultIds) => apiPost('/lab/results/compare', { result_ids: resultIds }),
   labReproduce: (id) => apiPost(`/lab/results/${encodeURIComponent(id)}/reproduce`),
+
+  // Finance (Phase S6): valuation & transaction analysis
+  financeCases: () => apiGet('/finance/cases'),
+  financeCase: (id) => apiGet(`/finance/cases/${encodeURIComponent(id)}`),
+  financeReport: (id) => apiGet(`/finance/cases/${encodeURIComponent(id)}/report`),
+  financeRun: (spec) => apiPost('/finance/cases', { spec }),
+  financeReproduce: (id) => apiPost(`/finance/cases/${encodeURIComponent(id)}/reproduce`),
 };
 
 // ---- small formatting helpers shared by pages ----------------------------

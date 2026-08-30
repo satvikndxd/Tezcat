@@ -955,6 +955,14 @@ app.include_router(plane_router)
 
 
 # ---------------------------------------------------------------------------
+# FINANCE (Phase S6): valuation & transaction analysis — research only
+# ---------------------------------------------------------------------------
+from tezcat.api.finance import router as finance_router  # noqa: E402
+
+app.include_router(finance_router)
+
+
+# ---------------------------------------------------------------------------
 # Static dashboard (built React app) — mounted last so /api wins.
 # ---------------------------------------------------------------------------
 _dist = Path(os.environ.get("TEZCAT_FRONTEND_DIST",
