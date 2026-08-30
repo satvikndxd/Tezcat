@@ -1,0 +1,486 @@
+{
+ "case_id": "meridian_acquisition_2026",
+ "name": "Meridian Microdevices \u2014 valuation and hypothetical acquisition by Vantera Systems",
+ "analyst_note": "Illustrative research case on fixture data. The transaction is hypothetical; no real companies or deals are referenced.",
+ "target": {
+  "name": "Meridian Microdevices, Inc.",
+  "ticker": "MRDN",
+  "sector": "Semiconductors \u2014 power & analog",
+  "description": "Meridian Microdevices is a synthetic illustrative mid-cap designer of power-management and analog semiconductors for automotive and industrial end-markets, with a fab-lite manufacturing model. All figures are fixture data constructed for this research example.",
+  "currency": "USD",
+  "units": "millions",
+  "share_price": 38.5,
+  "periods": [
+   {
+    "label": "FY2023",
+    "revenue": 1850.0,
+    "cogs": 940.0,
+    "opex": 460.0,
+    "depreciation_amortization": 145.0,
+    "interest_expense": 38.0,
+    "taxes": 56.0,
+    "capex": 175.0,
+    "net_working_capital": 210.0,
+    "cash": 320.0,
+    "debt": 650.0,
+    "diluted_shares": 142.0,
+    "provenance": {
+     "source": "synthetic fixture (illustrative company; not real data)",
+     "retrieved": "2026-08-27",
+     "note": "magnitudes modeled on a mid-cap semiconductor profile"
+    }
+   },
+   {
+    "label": "FY2024",
+    "revenue": 2040.0,
+    "cogs": 1020.0,
+    "opex": 500.0,
+    "depreciation_amortization": 158.0,
+    "interest_expense": 36.0,
+    "taxes": 69.0,
+    "capex": 190.0,
+    "net_working_capital": 232.0,
+    "cash": 405.0,
+    "debt": 625.0,
+    "diluted_shares": 144.0,
+    "provenance": {
+     "source": "synthetic fixture (illustrative company; not real data)",
+     "retrieved": "2026-08-27",
+     "note": "magnitudes modeled on a mid-cap semiconductor profile"
+    }
+   },
+   {
+    "label": "FY2025",
+    "revenue": 2290.0,
+    "cogs": 1130.0,
+    "opex": 545.0,
+    "depreciation_amortization": 172.0,
+    "interest_expense": 34.0,
+    "taxes": 87.0,
+    "capex": 215.0,
+    "net_working_capital": 260.0,
+    "cash": 480.0,
+    "debt": 600.0,
+    "diluted_shares": 146.0,
+    "provenance": {
+     "source": "synthetic fixture (illustrative company; not real data)",
+     "retrieved": "2026-08-27",
+     "note": "magnitudes modeled on a mid-cap semiconductor profile"
+    }
+   }
+  ]
+ },
+ "forecast": {
+  "revenue_growth": [
+   0.1,
+   0.09,
+   0.08,
+   0.07,
+   0.06
+  ],
+  "ebitda_margin": [
+   0.275,
+   0.28,
+   0.285,
+   0.285,
+   0.285
+  ],
+  "da_pct_revenue": [
+   0.075,
+   0.075,
+   0.075,
+   0.075,
+   0.075
+  ],
+  "capex_pct_revenue": [
+   0.095,
+   0.093,
+   0.09,
+   0.088,
+   0.085
+  ],
+  "nwc_pct_revenue": [
+   0.113,
+   0.113,
+   0.113,
+   0.113,
+   0.113
+  ],
+  "tax_rate": 0.23,
+  "rationale": "automotive/industrial design-win ramp tapering to GDP-plus; margin expansion from mix and fab-lite leverage"
+ },
+ "dcf": {
+  "wacc": 0.095,
+  "terminal_method": "gordon_growth",
+  "terminal_growth": 0.025,
+  "rationale": "CAPM-style build-up for a mid-cap semi; terminal growth at long-run nominal GDP share"
+ },
+ "comps_peers": [
+  {
+   "name": "Arcline Power Semiconductor",
+   "ticker": "ARCP",
+   "revenue": 3100.0,
+   "ebitda": 890.0,
+   "ebit": 660.0,
+   "net_income": 470.0,
+   "cash": 700.0,
+   "debt": 900.0,
+   "diluted_shares": 210.0,
+   "share_price": 41.0,
+   "provenance": {
+    "source": "synthetic fixture peer set",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "name": "Helios Analog Devices",
+   "ticker": "HLAD",
+   "revenue": 1450.0,
+   "ebitda": 420.0,
+   "ebit": 315.0,
+   "net_income": 228.0,
+   "cash": 380.0,
+   "debt": 250.0,
+   "diluted_shares": 118.0,
+   "share_price": 34.0,
+   "provenance": {
+    "source": "synthetic fixture peer set",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "name": "Kestrel Mixed-Signal",
+   "ticker": "KSTL",
+   "revenue": 2700.0,
+   "ebitda": 640.0,
+   "ebit": 455.0,
+   "net_income": 300.0,
+   "cash": 520.0,
+   "debt": 1100.0,
+   "diluted_shares": 168.0,
+   "share_price": 36.5,
+   "provenance": {
+    "source": "synthetic fixture peer set",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "name": "Novara Industrial ICs",
+   "ticker": "NVIC",
+   "revenue": 1900.0,
+   "ebitda": 545.0,
+   "ebit": 410.0,
+   "net_income": 275.0,
+   "cash": 410.0,
+   "debt": 480.0,
+   "diluted_shares": 132.0,
+   "share_price": 43.0,
+   "provenance": {
+    "source": "synthetic fixture peer set",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "name": "Southbridge Micro",
+   "ticker": "SBMC",
+   "revenue": 1250.0,
+   "ebitda": 300.0,
+   "ebit": 205.0,
+   "net_income": 128.0,
+   "cash": 260.0,
+   "debt": 340.0,
+   "diluted_shares": 95.0,
+   "share_price": 27.0,
+   "provenance": {
+    "source": "synthetic fixture peer set",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  }
+ ],
+ "comps_selection": {
+  "multiple": "ev_ebitda",
+  "statistic": "median",
+  "rationale": "EBITDA best normalizes capital-intensity differences across the peer set"
+ },
+ "precedent_transactions": [
+  {
+   "target": "Cobalt Sensor Systems",
+   "acquirer": "Meridian-class strategic",
+   "announced": "2023-04",
+   "enterprise_value": 4300.0,
+   "target_revenue": 1300.0,
+   "target_ebitda": 350.0,
+   "premium_pct": 0.28,
+   "sector": "semiconductors",
+   "rationale": "automotive sensing scale",
+   "provenance": {
+    "source": "synthetic fixture transaction set (no real deals referenced)",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "target": "Quartzline Analog",
+   "acquirer": "Large-cap strategic",
+   "announced": "2023-11",
+   "enterprise_value": 6100.0,
+   "target_revenue": 1750.0,
+   "target_ebitda": 505.0,
+   "premium_pct": 0.33,
+   "sector": "semiconductors",
+   "rationale": "analog portfolio consolidation",
+   "provenance": {
+    "source": "synthetic fixture transaction set (no real deals referenced)",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "target": "Ferrous Power ICs",
+   "acquirer": "Financial sponsor",
+   "announced": "2024-06",
+   "enterprise_value": 2850.0,
+   "target_revenue": 980.0,
+   "target_ebitda": 245.0,
+   "premium_pct": 0.24,
+   "sector": "semiconductors",
+   "rationale": "carve-out of power unit",
+   "provenance": {
+    "source": "synthetic fixture transaction set (no real deals referenced)",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "target": "Lumen Drive Semiconductor",
+   "acquirer": "Large-cap strategic",
+   "announced": "2025-02",
+   "enterprise_value": 5400.0,
+   "target_revenue": 1500.0,
+   "target_ebitda": 430.0,
+   "premium_pct": 0.36,
+   "sector": "semiconductors",
+   "rationale": "EV drivetrain content",
+   "provenance": {
+    "source": "synthetic fixture transaction set (no real deals referenced)",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  },
+  {
+   "target": "Halcyon Microsystems",
+   "acquirer": "Cross-border strategic",
+   "announced": "2025-09",
+   "enterprise_value": 3600.0,
+   "target_revenue": 1150.0,
+   "target_ebitda": 300.0,
+   "premium_pct": 0.3,
+   "sector": "semiconductors",
+   "rationale": "industrial MCU adjacency",
+   "provenance": {
+    "source": "synthetic fixture transaction set (no real deals referenced)",
+    "retrieved": "2026-08-27",
+    "note": ""
+   }
+  }
+ ],
+ "precedent_selection": {
+  "multiple": "ev_ebitda",
+  "statistic": "median",
+  "rationale": "control transactions in analog/power over the last three years"
+ },
+ "acquirer": {
+  "name": "Vantera Systems Corp.",
+  "ticker": "VNTR",
+  "sector": "Diversified semiconductors",
+  "description": "Synthetic illustrative large-cap diversified semiconductor acquirer (fixture data).",
+  "currency": "USD",
+  "units": "millions",
+  "share_price": 74.0,
+  "periods": [
+   {
+    "label": "FY2024",
+    "revenue": 8300.0,
+    "cogs": 3900.0,
+    "opex": 2120.0,
+    "depreciation_amortization": 610.0,
+    "interest_expense": 190.0,
+    "taxes": 355.0,
+    "capex": 640.0,
+    "net_working_capital": 890.0,
+    "cash": 1900.0,
+    "debt": 3300.0,
+    "diluted_shares": 408.0,
+    "provenance": {
+     "source": "synthetic fixture (illustrative company; not real data)",
+     "retrieved": "2026-08-27",
+     "note": "magnitudes modeled on a mid-cap semiconductor profile"
+    }
+   },
+   {
+    "label": "FY2025",
+    "revenue": 8900.0,
+    "cogs": 4150.0,
+    "opex": 2300.0,
+    "depreciation_amortization": 640.0,
+    "interest_expense": 185.0,
+    "taxes": 391.0,
+    "capex": 685.0,
+    "net_working_capital": 950.0,
+    "cash": 2100.0,
+    "debt": 3200.0,
+    "diluted_shares": 410.0,
+    "provenance": {
+     "source": "synthetic fixture (illustrative company; not real data)",
+     "retrieved": "2026-08-27",
+     "note": "magnitudes modeled on a mid-cap semiconductor profile"
+    }
+   }
+  ]
+ },
+ "transaction": {
+  "premium_pct": 0.3,
+  "pct_stock": 0.4,
+  "new_debt": 3500.0,
+  "advisory_fees": 70.0,
+  "financing_fees": 55.0,
+  "financing_fee_amortization_years": 5,
+  "cost_of_new_debt": 0.062,
+  "cash_yield": 0.04,
+  "minimum_cash": 800.0,
+  "refinance_target_debt": false,
+  "tax_rate": 0.23,
+  "synergies": {
+   "run_rate_pretax": 120.0,
+   "phase_in": [
+    0.5,
+    1.0,
+    1.0
+   ],
+   "rationale": "cost synergies: shared back-end, procurement, and public-company costs (~5% of target opex)"
+  },
+  "rationale": "60/40 cash-stock offer at a 30% premium, funded by new term debt and balance-sheet cash"
+ },
+ "earnings_growth": {
+  "acquirer_growth": [
+   0.07,
+   0.07,
+   0.06
+  ],
+  "target_growth": [
+   0.09,
+   0.08,
+   0.07
+  ],
+  "rationale": "consensus-style standalone net income paths"
+ },
+ "scenarios": [
+  {
+   "name": "base",
+   "description": "declared base-case assumptions",
+   "overrides": {}
+  },
+  {
+   "name": "downside",
+   "description": "slower ramp, margin pressure, higher discount rate, half synergies",
+   "overrides": {
+    "forecast.revenue_growth": [
+     0.06,
+     0.05,
+     0.04,
+     0.03,
+     0.03
+    ],
+    "forecast.ebitda_margin": [
+     0.26,
+     0.262,
+     0.265,
+     0.265,
+     0.265
+    ],
+    "dcf.wacc": 0.105,
+    "transaction.synergies.run_rate_pretax": 60.0
+   }
+  },
+  {
+   "name": "upside",
+   "description": "stronger design-win conversion, richer mix, lower discount rate, full synergies plus revenue synergies",
+   "overrides": {
+    "forecast.revenue_growth": [
+     0.115,
+     0.105,
+     0.095,
+     0.085,
+     0.075
+    ],
+    "forecast.ebitda_margin": [
+     0.285,
+     0.29,
+     0.295,
+     0.295,
+     0.295
+    ],
+    "dcf.wacc": 0.09,
+    "transaction.synergies.run_rate_pretax": 160.0
+   }
+  }
+ ],
+ "sensitivities": [
+  {
+   "name": "DCF: WACC x terminal growth",
+   "axis1": {
+    "path": "dcf.wacc",
+    "values": [
+     0.085,
+     0.09,
+     0.095,
+     0.1,
+     0.105
+    ],
+    "label": "WACC"
+   },
+   "axis2": {
+    "path": "dcf.terminal_growth",
+    "values": [
+     0.015,
+     0.02,
+     0.025,
+     0.03,
+     0.035
+    ],
+    "label": "terminal growth"
+   },
+   "metric": "dcf.implied_value_per_share"
+  },
+  {
+   "name": "M&A: premium x synergies",
+   "axis1": {
+    "path": "transaction.premium_pct",
+    "values": [
+     0.2,
+     0.25,
+     0.3,
+     0.35,
+     0.4
+    ],
+    "label": "premium"
+   },
+   "axis2": {
+    "path": "transaction.synergies.run_rate_pretax",
+    "values": [
+     60.0,
+     90.0,
+     120.0,
+     150.0
+    ],
+    "label": "run-rate synergies"
+   },
+   "metric": "pro_forma.years.0.accretion_dilution_pct"
+  }
+ ]
+}

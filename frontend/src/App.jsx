@@ -9,6 +9,7 @@ import Build from './pages/Build.jsx';
 import Ops from './pages/Ops.jsx';
 import Markets from './pages/Markets.jsx';
 import StrategyLab from './pages/StrategyLab.jsx';
+import Finance from './pages/Finance.jsx';
 
 // ---- tiny hash router ----------------------------------------------------
 
@@ -22,6 +23,7 @@ function parseRoute() {
     return { page: 'markets', id: parts[1] ? decodeURIComponent(parts[1]) : null };
   }
   if (parts[0] === 'lab') return { page: 'lab' };
+  if (parts[0] === 'finance') return { page: 'finance' };
   if (parts[0] === 'research') {
     return { page: 'research', id: parts[1] ? decodeURIComponent(parts[1]) : null };
   }
@@ -78,6 +80,7 @@ function StatusBar() {
         <a className="navlink" href="#/build">BUILD</a>
         <a className="navlink" href="#/research">RESEARCH</a>
         <a className="navlink" href="#/lab">LAB</a>
+        <a className="navlink" href="#/finance">FINANCE</a>
         <a className="navlink" href="#/markets">MARKETS</a>
         <a className="navlink" href="#/ops">TRADEOPS</a>
       </div>
@@ -118,6 +121,9 @@ export default function App() {
       break;
     case 'lab':
       page = <StrategyLab />;
+      break;
+    case 'finance':
+      page = <Finance />;
       break;
     default:
       page = <Home />;
