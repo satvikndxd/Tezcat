@@ -60,6 +60,11 @@ ARTIFACT_TYPES: Dict[str, str] = {
     "analysis": "any",
     "counterfactual": "cfx",
     "research_report": "rpt",
+    # Finance domain (Phase S6) — same graph, same provenance discipline
+    "company_financials": "cfn",
+    "valuation_case": "vca",
+    "valuation_output": "vlo",
+    "finance_report": "frp",
 }
 
 
